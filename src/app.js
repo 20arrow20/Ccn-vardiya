@@ -70,7 +70,7 @@ function defaultStore() {
 }
 let store = load();
 function normalize(raw) {
-  const s = migrateKeys(raw); const d = defaultStore();
+  const s = cleanPeople(migrateKeys(raw)); const d = defaultStore();
   return { ...d, ...s, areas: Array.isArray(s.areas) ? s.areas : d.areas, dayAreas: s.dayAreas || {}, settings: { ...d.settings, ...s.settings, hours: { ...d.settings.hours, ...(s.settings || {}).hours }, colors: { ...d.settings.colors, ...(s.settings || {}).colors } } };
 }
 function load() {
@@ -79,6 +79,20 @@ function load() {
     if (raw) return normalize(JSON.parse(raw));
   } catch (e) { /* depolama yoksa örnek veriyle devam */ }
   return makeDemo();
+}
+// Hatalı okumadan kalan kayıtları temizle: isim olmayanlar silinir, aynı kişinin bozuk kopyası asıl kayda katılır
+function cleanPeople(s) {
+  if (!s || !s.people) return s;
+  const entries = Object.entries(s.people).filter(([, p]) => looksLikeName(p.name)).sort((a, b) => a[0].length - b[0].length);
+  const people = {}; const map = {};
+  for (const [k, p] of entries) {
+    const into = Object.keys(people).find((ek) => sameish(people[ek].name, p.name));
+    if (into) { people[into] = { ...people[into], days: { ...p.days, ...people[into].days }, area: people[into].area || p.area }; map[k] = into; }
+    else { people[k] = p; map[k] = k; }
+  }
+  const dayAreas = {};
+  for (const [d, m] of Object.entries(s.dayAreas || {})) { dayAreas[d] = {}; for (const [k, a] of Object.entries(m)) if (map[k]) dayAreas[d][map[k]] = a; }
+  return { ...s, people, dayAreas };
 }
 // Eski sürümde kişiler farklı anahtarla tutuluyordu: yeni anahtara taşı
 function migrateKeys(s) {
@@ -507,7 +521,8 @@ function mergedReview() {
   const R = ui.review; const map = new Map(); const order = [];
   const add = (src, rawName, group, cells) => {
     const name = String(R.names[src] ?? rawName).trim().replace(/\s+/g, ' ');
-    const key = name ? nameKey(name) : '?' + src;
+    let key = name ? nameKey(name) : '?' + src;
+    if (name && !map.has(key)) { const sim = order.find((x) => x.name && sameish(x.name, name)); if (sim) key = sim.key; }
     let m = map.get(key);
     if (!m) { m = { key, name, srcs: [], groups: new Set(), files: new Set(), cells: {} }; map.set(key, m); order.push(m); }
     m.srcs.push(src); if (group) m.groups.add(group);
@@ -773,9 +788,10 @@ function saveReview() {
   if (!rows.length) { toast('Kaydedilecek kişi yok. İsimleri yazın ya da satırları işaretleyin.'); return; }
   if (store.demo) { store.people = {}; store.uploads = []; store.dayAreas = {}; store.demo = false; }
   for (const m of rows) {
-    const k = nameKey(m.name);
+    let k = nameKey(m.name);
+    if (!store.people[k]) { const sim = Object.keys(store.people).find((ek) => sameish(store.people[ek].name, m.name)); if (sim) k = sim; }
     const p = store.people[k] || { name: m.name, group: '', days: {} };
-    p.name = m.name;
+    if (k === nameKey(m.name)) p.name = m.name;
     for (const [d, c] of Object.entries(m.cells)) { if (CODES[c.code] && c.code) p.days[d] = c.code; else if (c.code === '') delete p.days[d]; }
     if (m.groups.size === 1) p.group = [...m.groups][0];
     else { // karışık listede ekip = en çok çalışılan vardiya
@@ -847,6 +863,29 @@ function loadImg(file) {
     im.onload = () => res(im); im.onerror = () => rej(new Error('Dosya bir görsel değil'));
     im.src = url;
   });
+}
+
+// İki metin arasındaki harf farkı (Levenshtein)
+function lev(a, b) {
+  const m = a.length, n = b.length; if (!m || !n) return m || n;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+// OCR'ın bir iki harf farklı okuduğu aynı kişi mi? (adı aynı, uzun isim, en çok 2 harf fark)
+const firstKey = (name) => nameKey(String(name).trim().split(/\s+/)[0] || '');
+function sameish(nameA, nameB) {
+  const a = nameKey(nameA), b = nameKey(nameB);
+  if (a === b) return true;
+  if (Math.min(a.length, b.length) < 10 || Math.abs(a.length - b.length) > 2) return false;
+  if (firstKey(nameA) !== firstKey(nameB)) return false;
+  const d = lev(a, b);
+  // 1 harf fark ya da yalnızca araya giren 2 fazla harf (ör. "GÖK" / "ĞGĞÖK"); "SILA" / "SENA" gibi farklı isimler ayrı kalır
+  return d <= 1 || (d === 2 && Math.abs(a.length - b.length) === 2);
 }
 
 // "Ad Soyad" gibi görünüyor mu: en az iki kelime, toplam 5+ harf, vardiya kodu değil
@@ -934,13 +973,13 @@ function detectGrid(px, w, h) {
 
 function cellStats(px, w, x0, y0, x1, y1) {
   const ix = Math.max(2, Math.round((x1 - x0) * 0.12)), iy = Math.max(2, Math.round((y1 - y0) * 0.12));
-  let tot = 0, ink = 0, red = 0, white = 0, gray = 0, lightN = 0, lightSum = 0; const hue = {};
+  let tot = 0, ink = 0, red = 0, white = 0, gray = 0, lightN = 0; const hue = {}; const hist = new Uint32Array(33);
   for (let y = Math.round(y0 + iy); y < y1 - iy; y++) for (let x = Math.round(x0 + ix); x < x1 - ix; x++) {
     const p = (y * w + x) * 4, r = px[p], g = px[p + 1], b = px[p + 2]; tot++;
     const [hh, s, v] = hsv(r, g, b);
     if (s > 0.3 && v > 0.35) { const n = hueName(hh); hue[n] = (hue[n] || 0) + 1; if (n === 'red') red++; }
     else if (v < 0.5) ink++;
-    else { if (v > 0.82) white++; else gray++; lightN++; lightSum += v; }
+    else { if (v > 0.82) white++; else gray++; lightN++; hist[Math.round(v * 32)]++; }
   }
   tot = tot || 1;
   let fill = 'white', fillFrac = white / tot;
@@ -949,7 +988,9 @@ function cellStats(px, w, x0, y0, x1, y1) {
   const colored = Object.values(hue).reduce((a, b) => a + b, 0);
   // kırmızı yazı (beyaz zemin üzerinde)
   const redText = fill === 'white' && red / tot > 0.015 && red > ink;
-  return { fill, inkFrac: ink / tot, redText, coloredFrac: colored / tot, light: lightN ? lightSum / lightN : 1, lightFrac: lightN / tot };
+  // zemin rengi = en sık görülen açık ton (yazının yumuşak kenarları zemini griye çekmesin)
+  let mode = 32; for (let i = 0; i <= 32; i++) if (hist[i] > hist[mode]) mode = i;
+  return { fill, inkFrac: ink / tot, redText, coloredFrac: colored / tot, light: lightN ? mode / 32 : 1, lightFrac: lightN / tot };
 }
 
 let workerP = null;
@@ -1100,7 +1141,7 @@ function findTables(img) {
       regs.splice(j, 1); j = i;
     }
   }
-  return regs.filter((r) => r.n >= 3 && r.x1 - r.x0 > w * 0.15)
+  return regs.filter((r) => r.n >= 3 && r.x1 - r.x0 > w * 0.15 && r.y1 - r.y0 > Math.max(30, r.rowH * 1.5))
     .map((r) => ({ x0: r.x0 / sc, x1: r.x1 / sc, y0: r.y0 / sc, y1: r.y1 / sc }))
     .sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
 }
@@ -1157,7 +1198,7 @@ async function analyzeTable(img, progress) {
   const bgV = lights.length ? lights[Math.floor(lights.length * 0.85)] : 1;
   for (const c of all.flat()) {
     const plain = c.fill === 'white' || c.fill === 'gray';
-    c.gray = plain && c.lightFrac > 0.45 && bgV - c.light > 0.07;
+    c.gray = plain && c.lightFrac > 0.45 && bgV - c.light > 0.08;
     if (plain) c.fill = c.gray ? 'gray' : 'white';
   }
   const grayRow = all.map((row) => row.filter((c) => c.gray).length >= row.length * 0.7);
@@ -1181,6 +1222,14 @@ async function analyzeTable(img, progress) {
   cctx.putImageData(cd, 0, 0); cctx.fillStyle = '#fff';
   for (const b of grid.hs) cctx.fillRect(0, b.a - 2, w, b.b - b.a + 5);
   for (const b of grid.vs) cctx.fillRect(b.a - 2, 0, b.b - b.a + 5, h);
+
+  // isimler için gri tonlu kopya (eşiklemesiz; harf kenarları korunur), çizgiler silinmiş
+  const soft = document.createElement('canvas'); soft.width = w; soft.height = h;
+  { const c3 = soft.getContext('2d'); const d3 = c3.createImageData(w, h);
+    for (let i = 0, p = 0; i < w * h; i++, p += 4) { const lum = (px[p] * 299 + px[p + 1] * 587 + px[p + 2] * 114) / 1000; const v = lum > 200 ? 255 : Math.max(0, Math.round((lum - 40) * 255 / 160)); d3.data[p] = d3.data[p + 1] = d3.data[p + 2] = v; d3.data[p + 3] = 255; }
+    c3.putImageData(d3, 0, 0); c3.fillStyle = '#fff';
+    for (const b of grid.hs) c3.fillRect(0, b.a - 2, w, b.b - b.a + 5);
+    for (const b of grid.vs) c3.fillRect(b.a - 2, 0, b.b - b.a + 5, h); }
 
   // gri zeminli başlık satırları için: yalnızca gerçekten koyu yazı
   const cleanDark = document.createElement('canvas'); cleanDark.width = w; cleanDark.height = h;
@@ -1215,10 +1264,15 @@ async function analyzeTable(img, progress) {
         progress(`${label} (${r + 1}/${rowsB.length})`, 0.15 + 0.4 * (r / rowsB.length));
         if (grayRow[r] || all[r][ci].gray) { out.push(''); continue; }
         const [y0, y1] = rowsB[r]; const [x0, x1] = colsB[ci];
-        const hgt = y1 - y0; const s = hgt < 40 ? 48 / hgt : 1;
-        const { c } = crop(clean, x0, y0, x1, y1, s);
-        const d = await ocr(worker, c, { tessedit_pageseg_mode: '7', tessedit_char_whitelist: '' });
-        out.push(d.text.replace(/[Ââ]/g, (c) => (c === 'Â' ? 'A' : 'a')).replace(/[Ûû]/g, (c) => (c === 'Û' ? 'U' : 'u')).replace(/[^A-Za-zÇĞİÖŞÜçğıöşüÂÎÛâîû .'-]/g, ' ').replace(/\s+/g, ' ').trim());
+        const hgt = y1 - y0; const s = Math.min(3, Math.max(1, 64 / hgt));
+        const tidy = (t) => t.replace(/[Ââ]/g, (c) => (c === 'Â' ? 'A' : 'a')).replace(/[Ûû]/g, (c) => (c === 'Û' ? 'U' : 'u'))
+          .replace(/[^A-Za-zÇĞİÖŞÜçğıöşü .'-]/g, ' ').replace(/\s+/g, ' ').trim()
+          .split(' ').filter((w, i, a) => !(w.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, '').length < 2 && (i === 0 || i === a.length - 1))).join(' ');
+        const read = async (src) => { const { c } = crop(src, x0, y0, x1, y1, s); const d = await ocr(worker, c, { tessedit_pageseg_mode: '7', tessedit_char_whitelist: '' }); return { t: tidy(d.text), conf: d.confidence || 0 }; };
+        const a = await read(soft);
+        let pick = a;
+        if (!looksLikeName(a.t) || a.conf < 75) { const b = await read(clean); if ((looksLikeName(b.t) && !looksLikeName(a.t)) || (looksLikeName(b.t) === looksLikeName(a.t) && b.conf > a.conf)) pick = b; }
+        out.push(pick.t);
       }
       return out;
     };

@@ -227,36 +227,30 @@ function dayLists(date) {
   return out;
 }
 
+// Bir vardiyanın sayıları: o vardiyada çalışanlar + o vardiya ekibinden OFF / raporlu / izinli olanlar
+function shiftStats(L) {
+  const a = L.absent;
+  const st = { working: L.working.length, off: a.OFF.length, rap: a.R.length, yi: a.YI.length, mi: a.MI.length };
+  st.total = st.working + st.off + st.rap + st.yi + st.mi;
+  return st;
+}
+
 function viewDaily() {
-  const d = ui.date; const lists = dayLists(d);
-  const t = todayIso();
-  const chips = [[addDays(t, -1), 'Dün'], [t, 'Bugün'], [addDays(t, 1), 'Yarın']]
-    .map(([v, l]) => `<button class="chip" data-act="set-date" data-date="${v}" aria-pressed="${v === d}">${l}</button>`).join('');
-  const tot = (k) => ['1', '2', '3'].reduce((n, g) => n + lists[g].absent[k].length, 0);
-  const working = ['1', '2', '3'].reduce((n, g) => n + lists[g].working.length, 0);
+  const d = ui.date; const lists = dayLists(d); const t = todayIso();
+  if (!ui.dayShift) ui.dayShift = shiftNow();
+  const g = ui.dayShift; const L = lists[g]; const S = shiftStats(L);
   const hasAny = Object.keys(store.people).length > 0;
   const range = dataRange();
   const outOfRange = hasAny && range.min && (d < range.min || d > range.max);
-
-  const shiftCard = (g) => {
-    const L = lists[g];
-    const grp = (code, title, arr, open) => {
-      const id = `${g}-${code}`; const collapsed = ui.collapsed[id] ?? !open;
-      return `<div class="grp ${collapsed && arr.length ? 'collapsed' : ''}">
-        <button class="grp-h btn ghost" style="width:100%;padding:0;min-height:28px" data-act="toggle-grp" data-id="${id}" aria-expanded="${!collapsed}"><span class="dot k-${code}"></span>${title}<span class="count">${arr.length} kişi</span></button>
-        ${arr.length ? `<ol class="names">${arr.map((p, i) => `<li><span class="n">${i + 1}</span><span>${esc(p.name)}</span></li>`).join('')}</ol>` : `<div class="empty">Kimse yok</div>`}
-      </div>`;
-    };
-    return `<section class="shift" data-s="${g}">
-      <div class="shift-head"><div class="shift-num">${g}</div><div class="grow"><h3>${g}. Vardiya</h3><div class="hrs">${esc(store.settings.hours[g] || '')}</div>
-        <div class="tot"><b>${L.working.length}</b> çalışan · <b>${L.absent.OFF.length}</b> OFF · <b>${L.absent.R.length + L.absent.YI.length + L.absent.MI.length}</b> rapor/izin</div></div>
-        <button class="iconbtn" title="${g}. vardiya alan listesi" aria-label="${g}. vardiya alan listesi" data-act="daily-areas" data-g="${g}">${ICON_LIST}</button>
-        <button class="iconbtn" title="${g}. vardiyayı paylaş" aria-label="${g}. vardiyayı paylaş" data-act="share" data-g="${g}">${ICON_SHARE}</button></div>
-      ${grp(g, 'Çalışanlar', L.working, true)}
-      ${ABSENT.filter((a) => a.code !== 'MI' || L.absent.MI.length).map((a) => grp(a.code, a.title, L.absent[a.code], true)).join('')}
-      ${L.unknown.length ? grp('', 'Bu gün için bilgi yok', L.unknown, false) : ''}
-    </section>`;
-  };
+  const chips = [[addDays(t, -1), 'Dün'], [t, 'Bugün'], [addDays(t, 1), 'Yarın']]
+    .map(([v, l]) => `<button class="chip" data-act="set-date" data-date="${v}" aria-pressed="${v === d}">${l}</button>`).join('');
+  const tabs = ['1', '2', '3'].map((x) => `<button class="chip k-${x} shiftchip" data-act="day-shift" data-g="${x}" aria-pressed="${x === g}">${x}. Vardiya<small>${lists[x].working.length} çalışan</small></button>`).join('');
+  const list = (code, title, arr, numbered) => arr.length ? `<section class="dsec">
+      <h4><span class="dot k-${code}"></span>${title}<span class="count">${arr.length}</span></h4>
+      <ol class="names ${numbered ? 'cols' : ''}">${arr.map((p, i) => `<li><span class="n">${i + 1}</span><span>${esc(p.name)}</span></li>`).join('')}</ol>
+    </section>` : '';
+  const unkOpen = !!ui.collapsed['unk-' + g];
+  const tile = (n, label, cls = '') => `<div class="stat ${cls}"><b>${n}</b><span>${label}</span></div>`;
 
   return `
   <div class="card stack">
@@ -265,38 +259,42 @@ function viewDaily() {
       <div class="dtitle"><h2>${fmtShort(d)}</h2><span>${d === t ? 'Bugün' : d === addDays(t, 1) ? 'Yarın' : d === addDays(t, -1) ? 'Dün' : '&nbsp;'}</span></div>
       <button class="iconbtn" aria-label="Sonraki gün" data-act="shift-date" data-n="1">${ICON_RIGHT}</button>
     </div>
-    <div class="row">
-      <div class="chips">${chips}</div>
-      <input type="date" id="date-pick" value="${d}" aria-label="Tarih seç">
-      <span style="flex:1"></span>
-      <button class="btn primary" data-act="share" data-g="all">${ICON_SHARE}Tümünü paylaş</button>
-    </div>
+    <div class="row"><div class="chips">${chips}</div><input type="date" id="date-pick" value="${d}" aria-label="Tarih seç"></div>
     ${outOfRange ? `<div class="note">Bu tarih yüklenen listelerin dışında (${fmtShort(range.min)} – ${fmtShort(range.max)}). Yeni dönemin listesini “Liste Yükle”den ekleyin.</div>` : ''}
-    <div class="summary">
-      <div class="sumtile"><b>${Object.keys(store.people).length}</b><span>Toplam personel</span></div>
-      <div class="sumtile"><b>${working}</b><span>Çalışan</span></div>
-      <div class="sumtile"><b style="color:var(--off)">${tot('OFF')}</b><span>OFF</span></div>
-      <div class="sumtile"><b>${tot('R') + tot('YI') + tot('MI')}</b><span>Rapor / izin</span></div>
-    </div>
+    <div class="shiftchips">${tabs}</div>
   </div>
-  ${hasAny ? `<div class="shifts">${['1', '2', '3'].map(shiftCard).join('')}</div>` : `<div class="card stack"><h2>Henüz liste yok</h2><p class="muted">Şirketin gönderdiği vardiya listesi görselini yükleyin; isimler ve günler otomatik okunur, kırmızı hücreler OFF sayılır.</p><div><button class="btn primary" data-act="goto" data-view="yukle">${ICON_UPLOAD}Liste yükle</button></div></div>`}`;
+  ${hasAny ? `<section class="card stack dayshift" data-s="${g}">
+    <div class="dhead">
+      <div class="shift-num">${g}</div>
+      <div class="grow"><h3>${g}. Vardiya</h3><div class="hrs">${fmtShort(d)} · ${esc(store.settings.hours[g] || '')}</div></div>
+    </div>
+    <div class="stats">
+      ${tile(S.total, 'Toplam', 'main')}${tile(S.working, 'Çalışan', 'k-' + g)}${tile(S.off, 'OFF', 'k-OFF')}${tile(S.rap, 'Raporlu', 'k-R')}${tile(S.yi + S.mi, 'İzinli', 'k-YI')}
+    </div>
+    <div class="row"><button class="btn primary" data-act="share" data-g="${g}">${ICON_SHARE}${g}. vardiyayı paylaş</button><button class="btn" data-act="daily-areas" data-g="${g}">${ICON_LIST}Alan listesi</button></div>
+    ${L.working.length ? list(g, 'Çalışanlar', L.working, true) : `<p class="empty">Bu gün ${g}. vardiyada çalışan görünmüyor.</p>`}
+    ${list('OFF', 'OFF', L.absent.OFF)}${list('R', 'Raporlu', L.absent.R)}${list('YI', 'Yıllık İzin', L.absent.YI)}${list('MI', 'Diğer İzin', L.absent.MI)}
+    ${L.unknown.length ? `<div class="unk"><button class="btn ghost small" data-act="toggle-unk" data-g="${g}">${unkOpen ? 'Gizle' : 'Göster'}: ${L.unknown.length} kişinin bu gün için kaydı yok</button>${unkOpen ? `<p class="small muted">${L.unknown.map((p) => esc(p.name)).join(', ')}</p>` : ''}</div>` : ''}
+  </section>
+  <div class="row"><button class="btn" data-act="share" data-g="all">${ICON_SHARE}Üç vardiyayı birlikte paylaş</button></div>`
+  : `<div class="card stack"><h2>Henüz liste yok</h2><p class="muted">Şirketin gönderdiği vardiya listesi görsellerini yükleyin; isimler ve günler otomatik okunur, kırmızı hücreler OFF sayılır.</p><div><button class="btn primary" data-act="goto" data-view="yukle">${ICON_UPLOAD}Liste yükle</button></div></div>`}`;
 }
 
 function shareText(date, which) {
   const lists = dayLists(date);
-  const head = `${store.settings.company ? store.settings.company + ' · ' : ''}${fmtShort(date)}`;
   const block = (g) => {
-    const L = lists[g]; const lines = [`*${g}. VARDİYA*${store.settings.hours[g] ? ` (${store.settings.hours[g]})` : ''}`];
-    lines.push(`Çalışanlar (${L.working.length}):`);
+    const L = lists[g]; const S = shiftStats(L); const h = store.settings.hours[g];
+    const lines = [`*${g}. VARDİYA*${h ? ` (${h})` : ''}`,
+      `Toplam: ${S.total} kişi | Çalışan: ${S.working} | OFF: ${S.off} | Raporlu: ${S.rap} | İzinli: ${S.yi + S.mi}`, '',
+      `Çalışanlar (${S.working}):`];
     L.working.forEach((p, i) => lines.push(`${i + 1}. ${p.name}`));
     if (!L.working.length) lines.push('-');
-    for (const a of ABSENT) if (L.absent[a.code].length) lines.push(`${a.title} (${L.absent[a.code].length}): ${L.absent[a.code].map((p) => p.name).join(', ')}`);
+    for (const a of ABSENT) if (L.absent[a.code].length) lines.push('', `${a.title} (${L.absent[a.code].length}): ${L.absent[a.code].map((p) => p.name).join(', ')}`);
     return lines.join('\n');
   };
+  const head = `${store.settings.company ? store.settings.company + ' · ' : ''}${fmtShort(date)}`;
   const groups = which === 'all' ? ['1', '2', '3'] : [which];
-  const tot = groups.reduce((n, g) => n + lists[g].working.length, 0);
-  const totLine = which === 'all' ? `Toplam çalışan: ${tot} (${groups.map((g) => `${g}. vardiya ${lists[g].working.length}`).join(', ')})` : `Toplam çalışan: ${tot}`;
-  return [head + '\n' + totLine, ...groups.map(block)].join('\n\n');
+  return [head, ...groups.map(block)].join('\n\n');
 }
 
 // ---------- Alan listesi (görev dağılımı) ----------
@@ -537,16 +535,20 @@ function mergedReview() {
     let m = map.get(key);
     if (!m) { m = { key, name, srcs: [], groups: new Set(), files: new Set(), cells: {} }; map.set(key, m); order.push(m); }
     m.srcs.push(src); m.raws = m.raws || []; m.raws.push(rawName); if (group) m.groups.add(group);
-    for (const [d, c] of Object.entries(cells)) m.cells[d] = c;
+    for (const [d, c] of Object.entries(cells)) {
+      const o = m.cells[d];
+      // zayıf bilgi = tablonun kendi vardiyası (boş hücre ya da kendi numarası); OFF/rapor/izin/başka vardiya güçlüdür
+      if (!o || !o.code || (o.weak && c.code) || (c.code && !c.weak)) m.cells[d] = c;
+    }
     return m;
   };
   for (const P of R.parts) P.rows.forEach((row, ri) => {
     const cells = {}; const g = row.group || P.group;
-    row.cells.forEach((c, ci) => { let code = c.code; if (!code && g && !c.raw && !c.gray) code = g; cells[addDays(P.start, ci)] = { code, raw: c.raw, fill: c.fill }; });
+    row.cells.forEach((c, ci) => { let code = c.code; const implied = !code && !!g && !c.raw && !c.gray; if (implied) code = g; cells[addDays(P.start, ci)] = { code, raw: c.raw, fill: c.fill, implied, weak: implied || (!!g && code === g) }; });
     add(`${P.id}:${ri}`, row.name, g, cells).files.add(P.file);
   });
   R.extra.forEach((id) => add(`x:${id}`, '', '', {}));
-  for (const m of order) for (const [d, code] of Object.entries(R.cellEdits[m.key] || {})) m.cells[d] = { code, raw: '', fill: '' };
+  for (const m of order) for (const [d, code] of Object.entries(R.cellEdits[m.key] || {})) m.cells[d] = { code, raw: '', fill: '', edited: true };
   let min = null, max = null;
   for (const P of R.parts) { const e = addDays(P.start, P.ncols - 1); if (!min || P.start < min) min = P.start; if (!max || e > max) max = e; }
   const dates = []; if (min) for (let d = min; d <= max && dates.length < 62; d = addDays(d, 1)) dates.push(d);
@@ -667,6 +669,8 @@ const actions = {
   }),
   'person': (el) => personSheet(el.dataset.key),
   'area-mode': (el) => { ui.areaMode = el.dataset.m; render(); },
+  'day-shift': (el) => { ui.dayShift = el.dataset.g; render(); },
+  'toggle-unk': (el) => { ui.collapsed['unk-' + el.dataset.g] = !ui.collapsed['unk-' + el.dataset.g]; render(); },
   'area-go-list': () => { ui.areaMode = 'liste'; ui.areaShown = true; render(); const r = document.querySelector('.arealist'); r && r.scrollIntoView({ block: 'start' }); },
   'area-shift': (el) => { ui.areaShift = el.dataset.g; render(); },
   'area-make': () => { ui.areaShown = true; render(); const r = document.querySelector('.arealist'); r && r.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
@@ -803,7 +807,13 @@ function saveReview() {
     if (!store.people[k]) { const sim = Object.keys(store.people).find((ek) => sameish(store.people[ek].name, m.name)); if (sim) k = sim; }
     const p = store.people[k] || { name: m.name, group: '', days: {} };
     if (k === nameKey(m.name)) p.name = m.name;
-    for (const [d, c] of Object.entries(m.cells)) { if (CODES[c.code] && c.code) p.days[d] = c.code; else if (c.code === '') delete p.days[d]; }
+    p.imp = p.imp || {};
+    for (const [d, c] of Object.entries(m.cells)) {
+      if (CODES[c.code] && c.code) {
+        if (c.weak && p.days[d] && !p.imp[d] && p.days[d] !== c.code) continue; // başka tablodaki güçlü bilgi korunur
+        p.days[d] = c.code; if (c.weak) p.imp[d] = 1; else delete p.imp[d];
+      } else if (c.edited && c.code === '') { delete p.days[d]; delete p.imp[d]; }
+    }
     store.aliases = store.aliases || {};
     for (const raw of m.raws || []) { const rk = nameKey(raw); if (rk && rk !== k && (looksLikeName(raw) || rk.length >= 6)) store.aliases[rk] = k; }
     if (m.groups.size === 1) p.group = [...m.groups][0];
@@ -1099,6 +1109,41 @@ async function readNamesWithClaude(src, rowsB, [x0, x1], include, progress) {
   return out;
 }
 
+async function readCellsWithClaude(src, cells, progress) {
+  const S = await getSampler(); if (!S || !cells.length) return null;
+  const tw = 120, th = 44, perRow = 6; // her kutu: numara + hücre görüntüsü
+  const imgs = []; const perImg = 60;
+  for (let i = 0; i < cells.length; i += perImg) {
+    const part = cells.slice(i, i + perImg); const rowsN = Math.ceil(part.length / perRow);
+    const c = document.createElement('canvas'); c.width = perRow * (tw + 8) + 8; c.height = rowsN * (th + 26) + 8;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    part.forEach((q, j) => {
+      const x = 8 + (j % perRow) * (tw + 8), y = 8 + Math.floor(j / perRow) * (th + 26);
+      g.fillStyle = '#000'; g.font = 'bold 15px sans-serif'; g.fillText(String(i + j + 1), x, y + 14);
+      const w0 = q.x1 - q.x0, h0 = q.y1 - q.y0; const sc = Math.min(tw / w0, th / h0);
+      g.drawImage(src, q.x0, q.y0, w0, h0, x, y + 20, w0 * sc, h0 * sc);
+      g.strokeStyle = '#888'; g.strokeRect(x - 1, y + 19, w0 * sc + 2, h0 * sc + 2);
+    });
+    imgs.push(c);
+  }
+  progress('Okunamayan hücreler Claude ile okunuyor', 0.9);
+  const out = cells.map(() => null);
+  try {
+    for (let i = 0; i < imgs.length; i += S.max) {
+      const blobs = await Promise.all(imgs.slice(i, i + S.max).map((c) => new Promise((res) => c.toBlob(res, 'image/png'))));
+      const res = await S.sm.json('These images show numbered boxes. Each box is one day-cell cut from a Turkish hospital staff shift roster. '
+        + 'Transcribe exactly what is written in each box (typical values: 1, 2, 3, OFF, R, Yİ, İ, S, A, G, or a time range like 08-16). '
+        + 'If a box is empty, use an empty string. Reply with only one JSON object mapping each box number (as a string) to its text, for example {"1":"1","2":"OFF","3":""}.',
+        { images: blobs.length === 1 ? blobs[0] : blobs });
+      if (res && typeof res === 'object') for (const [k, v] of Object.entries(res)) { const n = parseInt(k, 10) - 1; if (n >= 0 && n < out.length && typeof v === 'string') out[n] = v.trim(); }
+    }
+  } catch (e) {
+    console.warn('Claude hücre okuma', e && e.code);
+    if (e && ['not_granted', 'sampling_disabled', 'images_unavailable', 'capability_disabled', 'not_declared'].includes(e.code)) samplerP = Promise.resolve(null);
+  }
+  return out;
+}
+
 // Bir satırın gün hücrelerini tek seferde oku; karakterleri x konumuna göre sütunlara dağıt.
 // (Tek karakterli hücreleri ayrı ayrı okumak güvenilmez; satır bağlamında çok daha iyi tanınıyor.)
 async function readStrip(worker, clean, y0, y1, cols, psm) {
@@ -1138,8 +1183,16 @@ async function readRowCells(worker, clean, [y0, y1], cols, stats) {
 }
 
 function parseCode(t) {
+  // saat aralığı: "08-16", "16:00-24:00", "24-08" -> başlangıç saatine göre vardiya
+  const tm = String(t).match(/(\d{1,2})(?:[:.]\d{2})?\s*[-–]\s*(\d{1,2})/);
+  if (tm) { const h = +tm[1]; if (h >= 5 && h < 12) return '1'; if (h >= 12 && h < 20) return '2'; if (h <= 24) return '3'; }
   const s = t.replace(/[l|]/g, '1').toLocaleUpperCase('tr').replace(/[^A-ZÇĞİÖŞÜ0-9]/g, '');
   if (!s) return '';
+  if (/^(S|SB|SBH|SABAH)$/.test(s)) return '1';
+  if (/^(A|AK|AKŞ|AKS|AKŞAM|AKSAM)$/.test(s)) return '2';
+  if (/^(G|GC|GCE|GECE)$/.test(s)) return '3';
+  if (/^II$/.test(s)) return '2'; if (/^III$/.test(s)) return '3';
+  if (/^(2+)$/.test(s)) return '2'; if (/^(3+)$/.test(s)) return '3';
   if (/^(OFF|0FF|OF|FF|0F|O)$/.test(s)) return 'OFF';
   if (/^(Yİ|YI|Y1|YL|Y)$/.test(s)) return 'YI';
   if (/^(R|RP|RAP|RAPOR|RS|RE|RA)$/.test(s)) return 'R';
@@ -1497,9 +1550,16 @@ async function analyzeTable(img, progress) {
     const nm = names[r] || (worker ? '' : `Kişi ${r - firstPerson + 1}`);
     const empty = !nm && cells.every((c) => !c.code);
     if (empty) continue;
-    rows.push({ name: nm, skip: !!worker && !looksLikeName(nm), cells, group: section });
+    rows.push({ name: nm, skip: !!worker && !looksLikeName(nm), cells, group: section, _r: r });
     if (section) sectionsUsed.add(section);
   }
+  // okunamayan ("?") hücreler: claude.ai'de Claude okur
+  const qs = []; rows.forEach((row) => row.cells.forEach((c, k) => { if (c.code === 'Q') qs.push({ row, k, x0: colsB[dayCols[k]][0], x1: colsB[dayCols[k]][1], y0: rowsB[row._r][0], y1: rowsB[row._r][1] }); }));
+  if (qs.length) {
+    const got = await readCellsWithClaude(cv, qs, progress);
+    if (got) got.forEach((t, i) => { if (t == null) return; const pc = parseCode(t); const c = qs[i].row.cells[qs[i].k]; if (pc != null) { c.code = pc; c.raw = t; } else c.raw = t; });
+  }
+  rows.forEach((row) => { delete row._r; });
   // tabloda vardiya bölümleri varsa (gri bantlar) satırlar kendi vardiyasını taşır
   if (sectionsUsed.size > 1) group = '';
   else if (sectionsUsed.size === 1 && !group) group = [...sectionsUsed][0];

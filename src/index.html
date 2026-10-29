@@ -226,6 +226,26 @@ button.pchip:hover { border-color: var(--accent); }
 .aedit input[type=text] { width: 100%; }
 .aedit input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
 @media (max-width: 720px) { .tab { font-size: 11px; padding: 6px 2px; } }
+/* Günlük: tek vardiya görünümü */
+.dayshift .dhead { display: flex; align-items: center; gap: 12px; }
+.dayshift .dhead h3 { font-size: 22px; font-weight: 700; }
+.dayshift .dhead .hrs { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dayshift .dhead .grow { flex: 1; min-width: 0; }
+.dayshift .shift-num { font-family: var(--font-display); font-weight: 700; font-size: 24px; width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center; color: #fff; flex: none; }
+.dayshift[data-s="1"] .shift-num { background: var(--s1); } .dayshift[data-s="2"] .shift-num { background: var(--s2); } .dayshift[data-s="3"] .shift-num { background: var(--s3); }
+.dayshift[data-s="1"] { border-top: 4px solid var(--s1); } .dayshift[data-s="2"] { border-top: 4px solid var(--s2); } .dayshift[data-s="3"] { border-top: 4px solid var(--s3); }
+.stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.stat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 6px; text-align: center; background: var(--surface-2); min-width: 0; }
+.stat b { display: block; font-family: var(--font-display); font-size: 26px; line-height: 1.05; font-variant-numeric: tabular-nums; color: var(--k, var(--fg)); }
+.stat span { font-size: 11px; color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat.main { background: var(--fg); border-color: var(--fg); }
+.stat.main b, .stat.main span { color: var(--bg); }
+.dsec { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 6px; }
+.dsec h4 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 15px; font-family: var(--font-display); font-weight: 700; }
+.dsec h4 .count { margin-left: auto; font-family: var(--font-body); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (min-width: 640px) { .names.cols { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; } }
+.unk { border-top: 1px solid var(--line); padding-top: 6px; }
+.btn.small { min-height: 32px; padding: 4px 8px; font-size: 13px; color: var(--muted); }
 /* Toplamlar */
 .shift-head .tot { font-size: 12px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
 .shift-head .tot b { color: var(--fg); font-weight: 700; }

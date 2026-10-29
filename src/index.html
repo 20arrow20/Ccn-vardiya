@@ -107,7 +107,8 @@ label.field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); fon
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 12px; font-size: 13px; font-weight: 600; min-height: 32px; }
 .chip[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
-.summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 420px) { .summary { gap: 6px; } .sumtile { padding: 8px; } .sumtile b { font-size: 24px; } }
 .sumtile { border-radius: var(--radius); padding: 10px 12px; border: 1px solid var(--line); background: var(--surface); }
 .sumtile b { font-family: var(--font-display); font-size: 28px; font-variant-numeric: tabular-nums; display: block; line-height: 1; }
 .sumtile span { font-size: 12px; color: var(--muted); }

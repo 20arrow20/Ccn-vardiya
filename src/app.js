@@ -258,6 +258,7 @@ function viewDaily() {
     </div>
     ${outOfRange ? `<div class="note">Bu tarih yüklenen listelerin dışında (${fmtShort(range.min)} – ${fmtShort(range.max)}). Yeni dönemin listesini “Liste Yükle”den ekleyin.</div>` : ''}
     <div class="summary">
+      <div class="sumtile"><b>${Object.keys(store.people).length}</b><span>Toplam personel</span></div>
       <div class="sumtile"><b>${working}</b><span>Çalışan</span></div>
       <div class="sumtile"><b style="color:var(--off)">${tot('OFF')}</b><span>OFF</span></div>
       <div class="sumtile"><b>${tot('R') + tot('YI') + tot('MI')}</b><span>Rapor / izin</span></div>

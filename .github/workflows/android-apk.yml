@@ -2,8 +2,11 @@ name: Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, vardiya-panosu]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   apk:
@@ -20,8 +23,22 @@ jobs:
           java-version: 17
       - run: npm ci
       - run: npm run android:sync
-      - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - name: APK derle
+        run: cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+      - name: APK adlandır
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "VardiyaPanosu-$VERSION-${GITHUB_RUN_NUMBER}.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: vardiya-panosu-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: VardiyaPanosu-*.apk
+      - name: APK'yı ayrı dala koy
+        run: |
+          mkdir /tmp/apkbranch && cp VardiyaPanosu-*.apk /tmp/apkbranch/
+          cd /tmp/apkbranch
+          git init -q -b vardiya-panosu-apk
+          git config user.name "github-actions" && git config user.email "github-actions@users.noreply.github.com"
+          git add . && git commit -q -m "APK ${GITHUB_RUN_NUMBER}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" vardiya-panosu-apk

@@ -42,11 +42,22 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const cmpName = (a, b) => a.name.localeCompare(b.name, 'tr');
 
 // ---------- Veri ----------
+function defaultAreas() {
+  const all = ['1', '2', '3'];
+  return [
+    ['tomo-mr', 'Tomo-MR', all], ['rontgen-usg', 'Röntgen-USG', all], ['numune', 'Numune', all],
+    ['kadin-dogum', 'Kadın Doğum', all], ['cocuk-acil', 'Çocuk Acil', all], ['yesil-alan', 'Yeşil Alan', all],
+    ['sari-alan', 'Sarı Alan', all], ['yogun-bakim', 'Yoğun Bakım', all], ['kirmizi-alan', 'Kırmızı Alan', all],
+    ['merkez-lab', 'Merkez Lab', ['2', '3']],
+  ].map(([id, name, shifts]) => ({ id, name, shifts: [...shifts] }));
+}
 function defaultStore() {
   return {
     v: 1, demo: false,
     people: {},           // key -> { name, group: '1'|'2'|'3'|'', days: { 'YYYY-MM-DD': code } }
     uploads: [],          // { id, at, group, start, days, count, file }
+    areas: defaultAreas(), // görev alanları: { id, name, shifts: ['1','2','3'] }
+    dayAreas: {},         // tek günlük alan değişiklikleri: { 'YYYY-MM-DD': { kişiKey: alanId } }
     settings: {
       company: '',
       hours: { '1': '08:00–16:00', '2': '16:00–24:00', '3': '00:00–08:00' },
@@ -58,7 +69,7 @@ let store = load();
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) { const s = JSON.parse(raw); const d = defaultStore(); return { ...d, ...s, settings: { ...d.settings, ...s.settings, hours: { ...d.settings.hours, ...(s.settings || {}).hours }, colors: { ...d.settings.colors, ...(s.settings || {}).colors } } }; }
+    if (raw) { const s = JSON.parse(raw); const d = defaultStore(); return { ...d, ...s, areas: Array.isArray(s.areas) ? s.areas : d.areas, dayAreas: s.dayAreas || {}, settings: { ...d.settings, ...s.settings, hours: { ...d.settings.hours, ...(s.settings || {}).hours }, colors: { ...d.settings.colors, ...(s.settings || {}).colors } } }; }
   } catch (e) { /* depolama yoksa örnek veriyle devam */ }
   return makeDemo();
 }
@@ -86,6 +97,9 @@ function makeDemo() {
       s.people[nameKey(name)] = { name, group: g, days };
     });
   }
+  // örnek alan atamaları
+  const ids = s.areas.map((a) => a.id);
+  Object.values(s.people).forEach((p, i) => { const a = s.areas[i % ids.length]; if (a.shifts.includes(p.group)) p.area = a.id; });
   s.uploads = [];
   return s;
 }
@@ -99,6 +113,9 @@ const ui = {
   review: null,     // görsel analizi sonrası düzenleme taslağı
   busy: null,       // { text, pct }
   collapsed: {},
+  areaShift: null,   // alan listesi için seçili vardiya
+  areaShown: false,  // "Listeyi oluştur" basıldı mı
+  areaMode: 'liste', // 'liste' | 'ata'
 };
 const $app = document.getElementById('app');
 const $overlay = document.getElementById('overlay');
@@ -111,7 +128,7 @@ function dataRange() {
 }
 
 // ---------- Yönlendirme ----------
-const VIEWS = ['gunluk', 'cizelge', 'yukle', 'ayarlar'];
+const VIEWS = ['gunluk', 'alanlar', 'cizelge', 'yukle', 'ayarlar'];
 function go(view) { if (location.hash !== '#' + view) location.hash = view; else render(); }
 function fromHash() { const h = location.hash.replace('#', ''); ui.view = VIEWS.includes(h) ? h : 'gunluk'; render(); }
 window.addEventListener('hashchange', fromHash);
@@ -122,7 +139,7 @@ function render() {
   const sub = document.getElementById('brand-sub');
   sub.textContent = store.settings.company ? store.settings.company : '1 · 2 · 3 vardiya, OFF ve izin takibi';
   const banner = store.demo ? `<div class="banner"><p><b>Örnek veri gösteriliyor.</b> Kendi vardiya listenizin görselini “Liste Yükle” bölümünden ekleyin; örnek veri o zaman silinir.</p><button class="btn" data-act="clear-demo">Örnek veriyi temizle</button></div>` : '';
-  const views = { gunluk: viewDaily, cizelge: viewGrid, yukle: viewUpload, ayarlar: viewSettings };
+  const views = { gunluk: viewDaily, alanlar: viewAreas, cizelge: viewGrid, yukle: viewUpload, ayarlar: viewSettings };
   $app.innerHTML = banner + views[ui.view]();
   bindView();
 }
@@ -163,6 +180,7 @@ function viewDaily() {
     };
     return `<section class="shift" data-s="${g}">
       <div class="shift-head"><div class="shift-num">${g}</div><div class="grow"><h3>${g}. Vardiya</h3><div class="hrs">${esc(store.settings.hours[g] || '')}</div></div>
+        <button class="iconbtn" title="${g}. vardiya alan listesi" aria-label="${g}. vardiya alan listesi" data-act="daily-areas" data-g="${g}">${ICON_LIST}</button>
         <button class="iconbtn" title="${g}. vardiyayı paylaş" aria-label="${g}. vardiyayı paylaş" data-act="share" data-g="${g}">${ICON_SHARE}</button></div>
       ${grp(g, 'Çalışanlar', L.working, true)}
       ${ABSENT.filter((a) => a.code !== 'MI' || L.absent.MI.length).map((a) => grp(a.code, a.title, L.absent[a.code], true)).join('')}
@@ -174,7 +192,7 @@ function viewDaily() {
   <div class="card stack">
     <div class="datebar">
       <button class="iconbtn" aria-label="Önceki gün" data-act="shift-date" data-n="-1">${ICON_LEFT}</button>
-      <div class="dtitle"><h2>${fmtLong(d)}</h2><span>${dayName(d)}${d === t ? ' · bugün' : ''}</span></div>
+      <div class="dtitle"><h2>${fmtShort(d)}</h2><span>${d === t ? 'Bugün' : d === addDays(t, 1) ? 'Yarın' : d === addDays(t, -1) ? 'Dün' : '&nbsp;'}</span></div>
       <button class="iconbtn" aria-label="Sonraki gün" data-act="shift-date" data-n="1">${ICON_RIGHT}</button>
     </div>
     <div class="row">
@@ -195,7 +213,7 @@ function viewDaily() {
 
 function shareText(date, which) {
   const lists = dayLists(date);
-  const head = `${store.settings.company ? store.settings.company + ' · ' : ''}${fmtShort(date)} ${dayName(date)}`;
+  const head = `${store.settings.company ? store.settings.company + ' · ' : ''}${fmtShort(date)}`;
   const block = (g) => {
     const L = lists[g]; const lines = [`*${g}. VARDİYA*${store.settings.hours[g] ? ` (${store.settings.hours[g]})` : ''}`];
     lines.push(`Çalışanlar (${L.working.length}):`);
@@ -206,6 +224,157 @@ function shareText(date, which) {
   };
   const groups = which === 'all' ? ['1', '2', '3'] : [which];
   return [head, ...groups.map(block)].join('\n\n');
+}
+
+// ---------- Alan listesi (görev dağılımı) ----------
+function areaOf(p, date) { const o = (store.dayAreas[date] || {})[p.key]; return o !== undefined ? o : (p.area || ''); }
+function renameDayAreas(oldK, newK) {
+  for (const m of Object.values(store.dayAreas)) if (oldK in m) { if (newK) m[newK] = m[oldK]; delete m[oldK]; }
+}
+function shiftNow() {
+  // ayarlardaki saatlere göre şu an hangi vardiya (ör. "08:00–16:00")
+  const now = new Date(); const mins = now.getHours() * 60 + now.getMinutes();
+  for (const g of ['1', '2', '3']) {
+    const m = (store.settings.hours[g] || '').match(/(\d{1,2})[:.](\d{2})\D+(\d{1,2})[:.](\d{2})/); if (!m) continue;
+    const a = +m[1] * 60 + +m[2]; let b = +m[3] * 60 + +m[4]; if (b <= a) b += 1440;
+    if ((mins >= a && mins < b) || (mins + 1440 >= a && mins + 1440 < b)) return g;
+  }
+  return '1';
+}
+function areaList(date, g) {
+  const L = dayLists(date)[g];
+  const valid = store.areas.filter((a) => a.shifts.includes(g));
+  const byArea = {}; valid.forEach((a) => { byArea[a.id] = []; });
+  const unassigned = [];
+  for (const p of L.working) { const a = areaOf(p, date); if (byArea[a]) byArea[a].push(p); else unassigned.push(p); }
+  return { valid, byArea, unassigned, absent: L.absent };
+}
+function areaShareText(date, g) {
+  const A = areaList(date, g); const h = store.settings.hours[g];
+  const lines = [`${store.settings.company ? store.settings.company + ' · ' : ''}${fmtShort(date)}`, `*${g}. VARDİYA*${h ? ` (${h})` : ''}`, ''];
+  for (const a of A.valid) lines.push(`*${a.name}:* ${A.byArea[a.id].map((p) => p.name).join(', ') || '-'}`);
+  if (A.unassigned.length) lines.push(`*Atanmamış:* ${A.unassigned.map((p) => p.name).join(', ')}`);
+  const abs = ABSENT.filter((x) => A.absent[x.code].length);
+  if (abs.length) { lines.push(''); abs.forEach((x) => lines.push(`${x.title}: ${A.absent[x.code].map((p) => p.name).join(', ')}`)); }
+  return lines.join('\n');
+}
+const shiftsLabel = (a) => a.shifts.length === 3 ? 'Tüm vardiyalar' : a.shifts.map((g) => g + '.').join(' ') + ' vardiya';
+
+function viewAreas() {
+  if (!ui.areaShift) ui.areaShift = shiftNow();
+  const seg = `<div class="seg" role="tablist">${[['liste', 'Liste oluştur'], ['ata', 'Kişileri alanlara ata']].map(([v, l]) => `<button role="tab" data-act="area-mode" data-m="${v}" aria-selected="${ui.areaMode === v}">${l}</button>`).join('')}</div>`;
+  if (ui.areaMode === 'ata') return seg + viewAreaAssign();
+  const d = ui.date, t = todayIso(), g = ui.areaShift;
+  const shiftChips = ['1', '2', '3'].map((x) => `<button class="chip k-${x} shiftchip" data-act="area-shift" data-g="${x}" aria-pressed="${x === g}">${x}. Vardiya<small>${esc(store.settings.hours[x] || '')}</small></button>`).join('');
+  let result = '';
+  if (ui.areaShown) {
+    const A = areaList(d, g);
+    const chip = (p) => `<button class="pchip" data-act="area-move" data-key="${esc(p.key)}">${esc(p.name)}</button>`;
+    const total = A.unassigned.length + A.valid.reduce((n, a) => n + A.byArea[a.id].length, 0);
+    result = `<section class="card stack arealist">
+      <div class="row"><div style="flex:1;min-width:0"><div class="eyebrow">${fmtShort(d)} · ${total} çalışan</div><h2 style="font-size:24px">${g}. Vardiya alan listesi</h2></div>
+        <button class="btn" data-act="area-copy">Kopyala</button><button class="btn primary" data-act="area-share">${ICON_SHARE}Paylaş</button></div>
+      <div class="areas">${A.valid.map((a) => `<div class="arow ${A.byArea[a.id].length ? '' : 'none'}"><div class="aname">${esc(a.name)}<span>${A.byArea[a.id].length}</span></div><div class="pchips">${A.byArea[a.id].map(chip).join('') || '<span class="empty">Kimse yok</span>'}</div></div>`).join('')}
+        ${A.unassigned.length ? `<div class="arow warn"><div class="aname">Atanmamış<span>${A.unassigned.length}</span></div><div class="pchips">${A.unassigned.map(chip).join('')}</div></div>` : ''}</div>
+      <div class="absent">${ABSENT.filter((x) => A.absent[x.code].length).map((x) => `<div><span class="dot k-${x.code}"></span><b>${x.title} (${A.absent[x.code].length}):</b> ${A.absent[x.code].map((p) => esc(p.name)).join(', ')}</div>`).join('') || '<span class="small muted">Bu vardiyada OFF, rapor veya izinli yok.</span>'}</div>
+      <p class="small muted" style="margin:0">Bir isme dokunarak o kişinin alanını bu gün için ya da kalıcı olarak değiştirebilirsiniz.</p>
+    </section>`;
+  }
+  return seg + `<div class="card stack">
+    <div class="datebar">
+      <button class="iconbtn" aria-label="Önceki gün" data-act="shift-date" data-n="-1">${ICON_LEFT}</button>
+      <div class="dtitle"><h2>${fmtShort(d)}</h2><span>${d === t ? 'Bugün' : d === addDays(t, 1) ? 'Yarın' : d === addDays(t, -1) ? 'Dün' : '&nbsp;'}</span></div>
+      <button class="iconbtn" aria-label="Sonraki gün" data-act="shift-date" data-n="1">${ICON_RIGHT}</button>
+    </div>
+    <div class="row"><input type="date" id="date-pick" value="${d}" aria-label="Tarih seç"><button class="chip" data-act="set-date" data-date="${t}" aria-pressed="${d === t}">Bugün</button><button class="chip" data-act="set-date" data-date="${addDays(t, 1)}" aria-pressed="${d === addDays(t, 1)}">Yarın</button></div>
+    <div class="shiftchips">${shiftChips}</div>
+    <button class="btn primary big" data-act="area-make">${ICON_LIST}Listeyi oluştur</button>
+  </div>${result}`;
+}
+
+function viewAreaAssign() {
+  const people = allPeople();
+  const byArea = {}; store.areas.forEach((a) => { byArea[a.id] = []; });
+  const none = [];
+  for (const p of people.sort(cmpName)) (byArea[p.area] || none).push(p);
+  const chip = (p) => `<span class="pchip static">${esc(p.name)}${p.group ? `<span class="gtag k-${p.group}">${p.group}</span>` : ''}</span>`;
+  return `<div class="card stack">
+    <div class="row"><div style="flex:1;min-width:0"><div class="eyebrow">Kalıcı atamalar</div><h2 style="font-size:24px">Görev alanları</h2></div><button class="btn" data-act="areas-edit">Alanları düzenle</button></div>
+    <p class="small muted" style="margin:0">Her alan için “Kişi seç”e basıp çalışanları işaretleyin. Atamalar kaydedilir; yeni liste yüklendiğinde de korunur. Listede isimler o gün çalışanlara göre otomatik dağıtılır.</p>
+  </div>
+  <div class="assign">${store.areas.map((a) => `<section class="card stack acard">
+      <div class="row"><div style="flex:1;min-width:0"><h3 style="font-size:19px">${esc(a.name)}</h3><span class="small muted">${shiftsLabel(a)} · ${byArea[a.id].length} kişi</span></div><button class="btn" data-act="area-pick" data-id="${a.id}">${ICON_PLUS}Kişi seç</button></div>
+      <div class="pchips">${byArea[a.id].map(chip).join('') || '<span class="empty">Henüz kimse seçilmedi</span>'}</div>
+    </section>`).join('')}</div>
+  <div class="card stack"><h3 style="font-size:19px">Atanmamış kişiler (${none.length})</h3><div class="pchips">${none.map((p) => `<button class="pchip" data-act="person-area" data-key="${esc(p.key)}">${esc(p.name)}${p.group ? `<span class="gtag k-${p.group}">${p.group}</span>` : ''}</button>`).join('') || '<span class="empty">Herkes bir alana atanmış</span>'}</div></div>`;
+}
+
+// Alan için kişi seçme (işaretleme) penceresi
+function areaPickSheet(id) {
+  const a = store.areas.find((x) => x.id === id); if (!a) return;
+  const people = allPeople().filter((p) => !p.group || a.shifts.includes(p.group))
+    .sort((x, y) => (x.group || '9').localeCompare(y.group || '9') || cmpName(x, y));
+  const areaName = (aid) => (store.areas.find((x) => x.id === aid) || {}).name || '';
+  sheet(`<h3>${esc(a.name)} · kişi seç</h3>
+    <input type="text" id="ap-q" placeholder="İsim ara" aria-label="İsim ara">
+    <div class="checklist" id="ap-list">${people.map((p) => `<label data-n="${esc(p.name.toLocaleLowerCase('tr'))}"><input type="checkbox" value="${esc(p.key)}" ${p.area === id ? 'checked' : ''}><span class="cn">${esc(p.name)}</span>${p.group ? `<span class="gtag k-${p.group}">${p.group}</span>` : ''}${p.area && p.area !== id ? `<span class="small muted cur">${esc(areaName(p.area))}</span>` : ''}</label>`).join('') || '<p class="muted">Bu alanın vardiyalarında kişi yok.</p>'}</div>
+    <p class="small muted" style="margin:0">Başka alanda olan birini işaretlerseniz bu alana taşınır.</p>
+    <div class="row"><button class="btn primary" id="ap-save">Kaydet</button><button class="btn" data-x="1">Vazgeç</button><span style="flex:1"></span><span class="small muted" id="ap-count"></span></div>`, (bg) => {
+    const q = bg.querySelector('#ap-q'); const cnt = bg.querySelector('#ap-count');
+    const upd = () => { cnt.textContent = bg.querySelectorAll('#ap-list input:checked').length + ' kişi seçili'; };
+    upd(); bg.querySelector('#ap-list').addEventListener('change', upd);
+    q.addEventListener('input', () => { const v = q.value.toLocaleLowerCase('tr'); bg.querySelectorAll('#ap-list label').forEach((l) => { l.hidden = !!v && !l.dataset.n.includes(v); }); });
+    bg.querySelector('#ap-save').addEventListener('click', () => {
+      bg.querySelectorAll('#ap-list input').forEach((c) => { const p = store.people[c.value]; if (c.checked) p.area = id; else if (p.area === id) p.area = ''; });
+      store.demo = false; save(); closeSheet(); render(); toast(`${a.name} kaydedildi`);
+    });
+  });
+}
+
+// Bir kişinin alanını değiştir (listeden: bu gün / kalıcı; atama ekranından: kalıcı)
+function areaMoveSheet(key, date) {
+  const p = { key, ...store.people[key] }; const g = date ? p.days[date] : null;
+  const cur = date ? areaOf(p, date) : (p.area || '');
+  const opts = store.areas.filter((a) => !g || a.shifts.includes(g) || !['1', '2', '3'].includes(g));
+  sheet(`<h3>${esc(p.name)}${date ? ' · ' + fmtShort(date) : ''}</h3>
+    <div class="optlist">${opts.map((a) => `<button data-a="${a.id}" aria-pressed="${cur === a.id}">${esc(a.name)}</button>`).join('')}<button data-a="" aria-pressed="${!cur}">Atanmamış</button></div>
+    ${date ? `<label class="row small" style="gap:8px"><input type="checkbox" id="am-perm"> Kalıcı olarak ata (sonraki günlerde de bu alanda olsun)</label>` : ''}
+    <button class="btn" data-x="1">Kapat</button>`, (bg) => {
+    bg.querySelectorAll('[data-a]').forEach((b) => b.addEventListener('click', () => {
+      const aid = b.dataset.a; const perm = !date || bg.querySelector('#am-perm').checked;
+      if (perm) { store.people[key].area = aid; if (date && store.dayAreas[date]) delete store.dayAreas[date][key]; }
+      else { (store.dayAreas[date] = store.dayAreas[date] || {})[key] = aid; if ((store.people[key].area || '') === aid) delete store.dayAreas[date][key]; }
+      store.demo = false; save(); closeSheet(); render(); toast(perm ? 'Kalıcı olarak atandı' : 'Bu gün için değiştirildi');
+    }));
+  });
+}
+
+// Alanları ekle / yeniden adlandır / sil / vardiyalarını ayarla
+function areasEditSheet(draft) {
+  draft = draft || store.areas.map((a) => ({ ...a, shifts: [...a.shifts] }));
+  const read = (bg) => bg.querySelectorAll('.aedit').forEach((row, i) => {
+    draft[i].name = row.querySelector('input[type=text]').value;
+    draft[i].shifts = [...row.querySelectorAll('input[type=checkbox]')].filter((c) => c.checked).map((c) => c.value);
+  });
+  sheet(`<h3>Alanları düzenle</h3>
+    <div class="stack">${draft.map((a, i) => `<div class="aedit"><input type="text" value="${esc(a.name)}" aria-label="Alan adı">
+      <div class="row" style="gap:10px">${['1', '2', '3'].map((g) => `<label class="row small" style="gap:4px"><input type="checkbox" value="${g}" ${a.shifts.includes(g) ? 'checked' : ''}>${g}.</label>`).join('')}
+      <button class="iconbtn" data-del="${i}" aria-label="${esc(a.name)} alanını sil">${ICON_TRASH}</button></div></div>`).join('')}</div>
+    <button class="btn" id="ae-add">${ICON_PLUS}Alan ekle</button>
+    <p class="small muted" style="margin:0">İşaretli vardiyalar o alanın hangi vardiyalarda olduğunu gösterir (ör. Merkez Lab: 2. ve 3.).</p>
+    <div class="row"><button class="btn primary" id="ae-save">Kaydet</button><button class="btn" data-x="1">Vazgeç</button></div>`, (bg) => {
+    bg.querySelector('#ae-add').addEventListener('click', () => { read(bg); draft.push({ id: uid(), name: '', shifts: ['1', '2', '3'] }); areasEditSheet(draft); const ins = document.querySelectorAll('.aedit input[type=text]'); ins[ins.length - 1].focus(); });
+    bg.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => { read(bg); draft.splice(+b.dataset.del, 1); areasEditSheet(draft); }));
+    bg.querySelector('#ae-save').addEventListener('click', () => {
+      read(bg);
+      const clean = draft.map((a) => ({ ...a, name: a.name.trim() })).filter((a) => a.name);
+      if (clean.some((a) => !a.shifts.length)) { toast('Her alan için en az bir vardiya seçin'); return; }
+      const ids = new Set(clean.map((a) => a.id));
+      Object.values(store.people).forEach((p) => { if (p.area && !ids.has(p.area)) p.area = ''; });
+      for (const m of Object.values(store.dayAreas)) for (const k of Object.keys(m)) if (m[k] && !ids.has(m[k])) delete m[k];
+      store.areas = clean; save(); closeSheet(); render(); toast('Alanlar kaydedildi');
+    });
+  });
 }
 
 // ---------- Çizelge ----------
@@ -221,7 +390,7 @@ function viewGrid() {
   const t = todayIso();
   let people = allPeople().sort((a, b) => (a.group || '9').localeCompare(b.group || '9') || cmpName(a, b));
   if (ui.gridGroup !== 'all') people = people.filter((p) => p.group === ui.gridGroup);
-  const head = days.map((d) => { const dt = parseIso(d); const we = dt.getDay() === 0 || dt.getDay() === 6; return `<th class="${d === t ? 'today' : ''} ${we ? 'we' : ''}">${pad(dt.getDate())}<small>${DAY_SHORT[dt.getDay()]}</small></th>`; }).join('');
+  const head = days.map((d) => { const dt = parseIso(d); const we = dt.getDay() === 0 || dt.getDay() === 6; return `<th class="${d === t ? 'today' : ''} ${we ? 'we' : ''}">${pad(dt.getDate())}<small>${pad(dt.getMonth() + 1)}.${dt.getFullYear() % 100}</small></th>`; }).join('');
   const rows = people.map((p) => `<tr><td class="name"><button data-act="person" data-key="${esc(p.key)}">${esc(p.name)}</button>${p.group ? `<span class="gtag k-${p.group}">${p.group}</span>` : ''}</td>${days.map((d) => { const c = p.days[d] || ''; return `<td><button class="code k-${c}" data-act="cell" data-key="${esc(p.key)}" data-date="${d}" aria-label="${esc(p.name)} ${fmtShort(d)}: ${CODES[c] ? CODES[c].label : c}">${CODES[c] ? CODES[c].short : '?'}</button></td>`; }).join('')}</tr>`).join('');
   const filt = [['all', 'Tümü'], ['1', '1. Vardiya'], ['2', '2. Vardiya'], ['3', '3. Vardiya']].map(([v, l]) => `<button class="chip" data-act="grid-group" data-g="${v}" aria-pressed="${ui.gridGroup === v}">${l}</button>`).join('');
   return `<div class="card stack">
@@ -264,7 +433,7 @@ function viewUpload() {
 function viewReview() {
   const R = ui.review;
   const days = Array.from({ length: R.cols.length }, (_, i) => addDays(R.start, i));
-  const head = days.map((d) => { const dt = parseIso(d); return `<th>${pad(dt.getDate())}<small>${DAY_SHORT[dt.getDay()]}</small></th>`; }).join('');
+  const head = days.map((d) => { const dt = parseIso(d); return `<th>${pad(dt.getDate())}<small>${pad(dt.getMonth() + 1)}.${dt.getFullYear() % 100}</small></th>`; }).join('');
   const rows = R.rows.map((r, ri) => `<tr class="${r.skip ? 'skip' : ''}">
     <td><input type="checkbox" data-act="rv-skip" data-r="${ri}" ${r.skip ? '' : 'checked'} aria-label="Bu satırı al"></td>
     <td class="name"><input type="text" id="rv-name-${ri}" data-act="rv-name" data-r="${ri}" value="${esc(r.name)}" aria-label="Ad soyad"></td>
@@ -360,11 +529,21 @@ const actions = {
   'share': (el) => doShare(shareText(ui.date, el.dataset.g), el.dataset.g === 'all' ? 'Günün vardiya listesi' : `${el.dataset.g}. vardiya listesi`),
   'grid-group': (el) => { ui.gridGroup = el.dataset.g; render(); },
   'grid-move': (el) => { ui.gridStart = addDays(ui.gridStart, +el.dataset.n); render(); },
-  'cell': (el) => pickCode(store.people[el.dataset.key].days[el.dataset.date] || '', `${store.people[el.dataset.key].name} · ${fmtShort(el.dataset.date)} ${dayName(el.dataset.date)}`, (code) => {
+  'cell': (el) => pickCode(store.people[el.dataset.key].days[el.dataset.date] || '', `${store.people[el.dataset.key].name} · ${fmtShort(el.dataset.date)}`, (code) => {
     const p = store.people[el.dataset.key]; if (code) p.days[el.dataset.date] = code; else delete p.days[el.dataset.date];
     store.demo = false; save(); render();
   }),
   'person': (el) => personSheet(el.dataset.key),
+  'area-mode': (el) => { ui.areaMode = el.dataset.m; render(); },
+  'area-shift': (el) => { ui.areaShift = el.dataset.g; render(); },
+  'area-make': () => { ui.areaShown = true; render(); const r = document.querySelector('.arealist'); r && r.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+  'area-move': (el) => areaMoveSheet(el.dataset.key, ui.date),
+  'person-area': (el) => areaMoveSheet(el.dataset.key, null),
+  'area-pick': (el) => areaPickSheet(el.dataset.id),
+  'areas-edit': () => areasEditSheet(),
+  'area-share': () => doShare(areaShareText(ui.date, ui.areaShift), `${ui.areaShift}. vardiya alan listesi`),
+  'area-copy': async () => { const txt = areaShareText(ui.date, ui.areaShift); try { await navigator.clipboard.writeText(txt); toast('Liste kopyalandı'); } catch (e) { showText('Alan listesi', 'Metni seçip kopyalayın:', txt, true); } },
+  'daily-areas': (el) => { ui.areaShift = el.dataset.g; ui.areaShown = true; ui.areaMode = 'liste'; go('alanlar'); },
   'add-person': () => personSheet(null),
   'sample': async (el) => {
     const n = el.dataset.n;
@@ -399,7 +578,8 @@ function sheet(html, onBind) {
   bg.addEventListener('click', (e) => { if (e.target.dataset.close) closeSheet(); });
   bg.querySelectorAll('[data-x]').forEach((b) => b.addEventListener('click', closeSheet));
   onBind && onBind(bg);
-  const f = bg.querySelector('button, input, select'); f && f.focus();
+  // telefonda klavye açılmasın diye metin kutusuna değil pencereye odaklan
+  const sh = bg.querySelector('.sheet'); sh.tabIndex = -1; sh.focus();
 }
 function closeSheet() { $overlay.innerHTML = ''; }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $overlay.innerHTML) closeSheet(); });
@@ -413,18 +593,19 @@ function personSheet(key) {
   const p = key ? store.people[key] : { name: '', group: '1', days: {} };
   sheet(`<h3>${key ? 'Kişiyi düzenle' : 'Kişi ekle'}</h3>
     <label class="field">Ad soyad<input type="text" id="ps-name" value="${esc(p.name)}"></label>
+    <label class="field">Görev alanı<select id="ps-area"><option value="">Atanmamış</option>${store.areas.map((a) => `<option value="${a.id}" ${p.area === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
     <label class="field">Ekip / vardiya<select id="ps-group">${[['1', '1. Vardiya'], ['2', '2. Vardiya'], ['3', '3. Vardiya'], ['', 'Belirsiz']].map(([v, l]) => `<option value="${v}" ${p.group === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <div class="row"><button class="btn primary" id="ps-save">Kaydet</button><button class="btn" data-x="1">Vazgeç</button>${key ? '<span style="flex:1"></span><button class="btn danger" id="ps-del">Sil</button>' : ''}</div>`, (bg) => {
     bg.querySelector('#ps-save').addEventListener('click', () => {
-      const name = bg.querySelector('#ps-name').value.trim(); const group = bg.querySelector('#ps-group').value;
+      const name = bg.querySelector('#ps-name').value.trim(); const group = bg.querySelector('#ps-group').value; const area = bg.querySelector('#ps-area').value;
       if (!name) { toast('Ad soyad yazın'); return; }
       const nk = nameKey(name);
-      if (key && nk !== key) { store.people[nk] = { ...store.people[key], ...(store.people[nk] || {}), name, group, days: { ...store.people[key].days, ...((store.people[nk] || {}).days) } }; delete store.people[key]; }
-      else store.people[nk] = { ...(store.people[nk] || p), name, group };
+      if (key && nk !== key) { store.people[nk] = { ...store.people[key], ...(store.people[nk] || {}), name, group, area, days: { ...store.people[key].days, ...((store.people[nk] || {}).days) } }; delete store.people[key]; renameDayAreas(key, nk); }
+      else store.people[nk] = { ...(store.people[nk] || p), name, group, area };
       store.demo = false; save(); closeSheet(); render();
     });
     const del = bg.querySelector('#ps-del');
-    del && del.addEventListener('click', () => { if (del.dataset.sure) { delete store.people[key]; save(); closeSheet(); render(); toast('Silindi'); } else { del.dataset.sure = '1'; del.textContent = 'Silmeyi onayla'; } });
+    del && del.addEventListener('click', () => { if (del.dataset.sure) { delete store.people[key]; renameDayAreas(key, null); save(); closeSheet(); render(); toast('Silindi'); } else { del.dataset.sure = '1'; del.textContent = 'Silmeyi onayla'; } });
   });
 }
 
@@ -844,5 +1025,7 @@ const ICON_UPLOAD = svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><p
 const ICON_IMAGE = svg('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>');
 const ICON_PLUS = svg('<path d="M12 5v14M5 12h14"/>');
 const ICON_CHECK = svg('<path d="M20 6L9 17l-5-5"/>');
+const ICON_LIST = svg('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>');
+const ICON_TRASH = svg('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>');
 
 fromHash();

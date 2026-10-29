@@ -1,0 +1,23 @@
+{
+  "name": "vardiya-panosu",
+  "version": "1.0.0",
+  "description": "Vardiya listesi görsellerinden 1/2/3 vardiya, OFF, rapor ve izin listeleri",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "serve": "node tools/build.mjs && python3 -m http.server 8080 --directory www",
+    "android:sync": "node tools/build.mjs && npx cap sync android",
+    "android:apk": "node tools/build.mjs && npx cap sync android && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "6.2.2",
+    "@capacitor/core": "6.2.2",
+    "@capacitor/share": "6.0.3",
+    "@tesseract.js-data/tur": "1.0.0",
+    "tesseract.js": "5.1.1",
+    "tesseract.js-core": "5.1.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "6.2.2"
+  },
+  "private": true
+}

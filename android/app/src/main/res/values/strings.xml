@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Vardiya Panosu</string>
+    <string name="title_activity_main">Vardiya Panosu</string>
+    <string name="package_name">com.vardiyapanosu.app</string>
+    <string name="custom_url_scheme">com.vardiyapanosu.app</string>
+</resources>

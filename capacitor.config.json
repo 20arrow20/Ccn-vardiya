@@ -1,0 +1,8 @@
+{
+  "appId": "com.vardiyapanosu.app",
+  "appName": "Vardiya Panosu",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}

@@ -1,5 +1,5 @@
 // src/ -> www/ : Capacitor (APK) ve normal tarayıcı için tam HTML belgesi üretir
-import { readFileSync, writeFileSync, rmSync, cpSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync, cpSync, mkdirSync, readdirSync } from 'node:fs';
 const root = new URL('..', import.meta.url).pathname;
 // OCR dosyalarını node_modules'tan src/vendor'a kopyala (git'e girmez)
 const nm = root + 'node_modules/';
@@ -15,8 +15,9 @@ for (const f of ['tesseract-core-simd-lstm.wasm.js', 'tesseract-core-lstm.wasm.j
 // Türkçe model: sıkıştırılmış dosya base64 metin olarak (her sunucu .txt dosyasını sorunsuz verir)
 writeFileSync(root + 'src/vendor/lang/tur.b64.txt', readFileSync(nm + '@tesseract.js-data/tur/4.0.0_best_int/tur.traineddata.gz').toString('base64'));
 
-rmSync(root + 'www', { recursive: true, force: true });
-mkdirSync(root + 'www');
+// klasörü silmeden içini temizle (açık bir yerel sunucu klasörü kaybetmesin)
+mkdirSync(root + 'www', { recursive: true });
+for (const f of readdirSync(root + 'www')) rmSync(root + 'www/' + f, { recursive: true, force: true });
 cpSync(root + 'src', root + 'www', { recursive: true });
 const body = readFileSync(root + 'src/index.html', 'utf8');
 writeFileSync(root + 'www/index.html', `<!doctype html>

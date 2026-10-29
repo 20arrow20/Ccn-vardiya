@@ -69,10 +69,14 @@ function defaultStore() {
   };
 }
 let store = load();
+function normalize(raw) {
+  const s = migrateKeys(raw); const d = defaultStore();
+  return { ...d, ...s, areas: Array.isArray(s.areas) ? s.areas : d.areas, dayAreas: s.dayAreas || {}, settings: { ...d.settings, ...s.settings, hours: { ...d.settings.hours, ...(s.settings || {}).hours }, colors: { ...d.settings.colors, ...(s.settings || {}).colors } } };
+}
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) { const s = migrateKeys(JSON.parse(raw)); const d = defaultStore(); return { ...d, ...s, areas: Array.isArray(s.areas) ? s.areas : d.areas, dayAreas: s.dayAreas || {}, settings: { ...d.settings, ...s.settings, hours: { ...d.settings.hours, ...(s.settings || {}).hours }, colors: { ...d.settings.colors, ...(s.settings || {}).colors } } }; }
+    if (raw) return normalize(JSON.parse(raw));
   } catch (e) { /* depolama yoksa örnek veriyle devam */ }
   return makeDemo();
 }
@@ -85,7 +89,42 @@ function migrateKeys(s) {
   for (const [d, m] of Object.entries(s.dayAreas || {})) { dayAreas[d] = {}; for (const [k, a] of Object.entries(m)) dayAreas[d][map[k] || k] = a; }
   return { ...s, people, dayAreas, keyV: 2 };
 }
-function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) { /* yoksay */ } }
+// Kayıt: cihazda (localStorage — APK'da kalıcı) ve sayfa claude.ai'de açıldıysa kalıcı veritabanına.
+// claude.ai görüntüleyicisinde tarayıcı belleği kalıcı değil; asıl kayıt veritabanıdır.
+const CLIENT = uid();
+let remote = null, remoteTimer = null;
+function save() {
+  store.savedAt = Date.now();
+  // 4 aydan eski gün kayıtlarını at (veri sınırsız büyümesin)
+  const cut = addDays(todayIso(), -120);
+  for (const p of Object.values(store.people)) for (const d of Object.keys(p.days)) if (d < cut) delete p.days[d];
+  for (const d of Object.keys(store.dayAreas)) if (d < cut) delete store.dayAreas[d];
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) { /* yoksay */ }
+  if (remote && !store.demo) { clearTimeout(remoteTimer); remoteTimer = setTimeout(pushRemote, 300); }
+}
+async function pushRemote() {
+  try { await remote.set({ json: JSON.stringify(store), at: store.savedAt, by: CLIENT }); }
+  catch (e) { toast('Kaydedilemedi: ' + (e && (e.message || e.code) || 'bağlantı hatası')); }
+}
+async function initRemote() {
+  try {
+    if (!window.claude || typeof window.claude.use !== 'function') return; // APK veya normal tarayıcı
+    const db = await window.claude.use('db'); if (!db) return;
+    const ref = db.doc('app/state');
+    const apply = (snap) => {
+      if (!snap.exists) return false;
+      const d = snap.data();
+      if (!d || typeof d.json !== 'string' || d.by === CLIENT || (store.savedAt && d.at <= store.savedAt)) return true;
+      store = normalize(JSON.parse(d.json));
+      try { localStorage.setItem(STORE_KEY, d.json); } catch (e) { /* yoksay */ }
+      render(); return true;
+    };
+    const had = apply(await ref.get());
+    remote = ref;
+    if (!had && !store.demo) pushRemote(); // ilk kez: cihazdaki veriyi yükle
+    ref.onSnapshot(apply, () => {});
+  } catch (e) { console.warn('db', e); }
+}
 
 // Örnek veri: üç ekip, 14 günlük dönem, döner OFF günleri
 function makeDemo() {
@@ -141,8 +180,11 @@ function dataRange() {
 
 // ---------- Yönlendirme ----------
 const VIEWS = ['gunluk', 'alanlar', 'cizelge', 'yukle', 'ayarlar'];
-function go(view) { if (location.hash !== '#' + view) location.hash = view; else render(); }
-function fromHash() { const h = location.hash.replace('#', ''); ui.view = VIEWS.includes(h) ? h : 'gunluk'; render(); }
+function go(view) {
+  ui.view = VIEWS.includes(view) ? view : 'gunluk'; render(); window.scrollTo(0, 0);
+  try { if (location.hash !== '#' + ui.view) location.hash = ui.view; } catch (e) { /* çerçeve izin vermezse yoksay */ }
+}
+function fromHash() { const h = location.hash.replace('#', ''); const v = VIEWS.includes(h) ? h : 'gunluk'; if (v !== ui.view || !$app.innerHTML) { ui.view = v; render(); } }
 window.addEventListener('hashchange', fromHash);
 document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => go(b.dataset.view)));
 
@@ -283,6 +325,14 @@ function viewAreas() {
     const A = areaList(d, g);
     const chip = (p) => `<button class="pchip" data-act="area-move" data-key="${esc(p.key)}">${esc(p.name)}</button>`;
     const total = A.unassigned.length + A.valid.reduce((n, a) => n + A.byArea[a.id].length, 0);
+    const range = dataRange(); const hasDay = Object.values(store.people).some((p) => p.days[d]);
+    if (!hasDay) {
+      result = `<section class="card stack arealist"><h2 style="font-size:22px">${fmtShort(d)} için vardiya listesi yok</h2>
+        <p class="muted" style="margin:0">${range.min ? `Yüklenen listeler ${fmtShort(range.min)} – ${fmtShort(range.max)} tarihlerini kapsıyor. O aralıktan bir tarih seçin ya da bu tarihin listesini yükleyin.` : 'Henüz vardiya listesi yüklenmedi. Önce “Liste Yükle”den görselleri ekleyin.'}</p>
+        <div class="row">${range.min ? `<button class="btn primary" data-act="set-date" data-date="${todayIso() >= range.min && todayIso() <= range.max ? todayIso() : range.min}">${fmtShort(todayIso() >= range.min && todayIso() <= range.max ? todayIso() : range.min)} tarihine git</button>` : ''}<button class="btn" data-act="goto" data-view="yukle">${ICON_UPLOAD}Liste yükle</button></div></section>`;
+    } else if (!total) {
+      result = `<section class="card stack arealist"><h2 style="font-size:22px">${fmtShort(d)} · ${g}. vardiyada çalışan yok</h2><p class="muted" style="margin:0">Bu gün ${g}. vardiyada çalışan görünmüyor. Başka bir vardiya seçin.</p></section>`;
+    } else
     result = `<section class="card stack arealist">
       <div class="row"><div style="flex:1;min-width:0"><div class="eyebrow">${fmtShort(d)} · ${total} çalışan</div><h2 style="font-size:24px">${g}. Vardiya alan listesi</h2></div>
         <button class="btn" data-act="area-copy">Kopyala</button><button class="btn primary" data-act="area-share">${ICON_SHARE}Paylaş</button></div>
@@ -311,7 +361,7 @@ function viewAreaAssign() {
   for (const p of people.sort(cmpName)) (byArea[p.area] || none).push(p);
   const chip = (p) => `<span class="pchip static">${esc(p.name)}${p.group ? `<span class="gtag k-${p.group}">${p.group}</span>` : ''}</span>`;
   return `<div class="card stack">
-    <div class="row"><div style="flex:1;min-width:0"><div class="eyebrow">Kalıcı atamalar</div><h2 style="font-size:24px">Görev alanları</h2></div><button class="btn" data-act="areas-edit">Alanları düzenle</button></div>
+    <div class="row"><div style="flex:1;min-width:0"><div class="eyebrow">Kalıcı atamalar</div><h2 style="font-size:24px">Görev alanları</h2></div><button class="btn" data-act="areas-edit">Alanları düzenle</button><button class="btn primary" data-act="area-go-list">${ICON_LIST}Listeyi oluştur</button></div>
     <p class="small muted" style="margin:0">Her alan için “Kişi seç”e basıp çalışanları işaretleyin. Atamalar kaydedilir; yeni liste yüklendiğinde de korunur. Listede isimler o gün çalışanlara göre otomatik dağıtılır.</p>
   </div>
   <div class="assign">${store.areas.map((a) => `<section class="card stack acard">
@@ -576,6 +626,7 @@ const actions = {
   }),
   'person': (el) => personSheet(el.dataset.key),
   'area-mode': (el) => { ui.areaMode = el.dataset.m; render(); },
+  'area-go-list': () => { ui.areaMode = 'liste'; ui.areaShown = true; render(); const r = document.querySelector('.arealist'); r && r.scrollIntoView({ block: 'start' }); },
   'area-shift': (el) => { ui.areaShift = el.dataset.g; render(); },
   'area-make': () => { ui.areaShown = true; render(); const r = document.querySelector('.arealist'); r && r.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
   'area-move': (el) => areaMoveSheet(el.dataset.key, ui.date),
@@ -694,7 +745,8 @@ function renameReviewRow(key, value) {
 }
 
 function saveReview() {
-  const R = ui.review; const M = mergedReview();
+  const R = ui.review; if (!R) { go('gunluk'); return; }
+  const M = mergedReview();
   const rows = M.rows.filter((m) => !R.skip[m.key] && m.name);
   if (!rows.length) { toast('Kaydedilecek kişi yok'); return; }
   if (store.demo) { store.people = {}; store.uploads = []; store.dayAreas = {}; store.demo = false; }
@@ -1096,4 +1148,5 @@ const ICON_CHECK = svg('<path d="M20 6L9 17l-5-5"/>');
 const ICON_LIST = svg('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>');
 const ICON_TRASH = svg('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>');
 
-fromHash();
+{ const h = location.hash.replace('#', ''); ui.view = VIEWS.includes(h) ? h : 'gunluk'; render(); }
+initRemote();

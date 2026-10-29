@@ -514,9 +514,9 @@ function mergedReview() {
     return m;
   };
   for (const P of R.parts) P.rows.forEach((row, ri) => {
-    const cells = {};
-    row.cells.forEach((c, ci) => { let code = c.code; if (!code && P.group && !c.raw) code = P.group; cells[addDays(P.start, ci)] = { code, raw: c.raw, fill: c.fill }; });
-    add(`${P.id}:${ri}`, row.name, P.group, cells).files.add(P.file);
+    const cells = {}; const g = row.group || P.group;
+    row.cells.forEach((c, ci) => { let code = c.code; if (!code && g && !c.raw && !c.gray) code = g; cells[addDays(P.start, ci)] = { code, raw: c.raw, fill: c.fill }; });
+    add(`${P.id}:${ri}`, row.name, g, cells).files.add(P.file);
   });
   R.extra.forEach((id) => add(`x:${id}`, '', '', {}));
   for (const m of order) for (const [d, code] of Object.entries(R.cellEdits[m.key] || {})) m.cells[d] = { code, raw: '', fill: '' };
@@ -543,7 +543,7 @@ function viewReview() {
       <div class="stack" style="gap:8px;min-width:0">
         <div class="row" style="flex-wrap:nowrap"><b class="fname">${esc(P.file)}</b><span style="flex:1"></span><button class="iconbtn" data-act="rv-remove" data-id="${P.id}" aria-label="${esc(P.file)} görselini çıkar">${ICON_TRASH}</button></div>
         <span class="small muted">${P.rows.length} satır · ${fmtShort(P.start)} – ${fmtShort(addDays(P.start, P.ncols - 1))}</span>
-        ${P.group ? '' : '<span class="small" style="color:var(--off)">Bu tablonun vardiyasını seçin; seçilmezse yazısız hücreler çalışma sayılmaz.</span>'}
+        ${P.group || P.rows.every((r) => r.group) ? '' : '<span class="small" style="color:var(--off)">Bu tablonun vardiyasını seçin; seçilmezse yazısız hücreler çalışma sayılmaz.</span>'}
         <div class="settings-grid" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">
           <label class="field">Vardiya<select class="rv-group" data-id="${P.id}">${[['1', '1. Vardiya'], ['2', '2. Vardiya'], ['3', '3. Vardiya'], ['', 'Karışık']].map(([v, l]) => `<option value="${v}" ${P.group === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
           <label class="field">İlk sütun tarihi<input type="date" class="rv-start" data-id="${P.id}" value="${P.start}"></label>
@@ -933,14 +933,13 @@ function detectGrid(px, w, h) {
 
 function cellStats(px, w, x0, y0, x1, y1) {
   const ix = Math.max(2, Math.round((x1 - x0) * 0.12)), iy = Math.max(2, Math.round((y1 - y0) * 0.12));
-  let tot = 0, ink = 0, red = 0, white = 0, gray = 0; const hue = {};
+  let tot = 0, ink = 0, red = 0, white = 0, gray = 0, lightN = 0, lightSum = 0; const hue = {};
   for (let y = Math.round(y0 + iy); y < y1 - iy; y++) for (let x = Math.round(x0 + ix); x < x1 - ix; x++) {
     const p = (y * w + x) * 4, r = px[p], g = px[p + 1], b = px[p + 2]; tot++;
     const [hh, s, v] = hsv(r, g, b);
     if (s > 0.3 && v > 0.35) { const n = hueName(hh); hue[n] = (hue[n] || 0) + 1; if (n === 'red') red++; }
     else if (v < 0.5) ink++;
-    else if (v > 0.82) white++;
-    else gray++;
+    else { if (v > 0.82) white++; else gray++; lightN++; lightSum += v; }
   }
   tot = tot || 1;
   let fill = 'white', fillFrac = white / tot;
@@ -949,7 +948,7 @@ function cellStats(px, w, x0, y0, x1, y1) {
   const colored = Object.values(hue).reduce((a, b) => a + b, 0);
   // kırmızı yazı (beyaz zemin üzerinde)
   const redText = fill === 'white' && red / tot > 0.015 && red > ink;
-  return { fill, inkFrac: ink / tot, redText, coloredFrac: colored / tot };
+  return { fill, inkFrac: ink / tot, redText, coloredFrac: colored / tot, light: lightN ? lightSum / lightN : 1, lightFrac: lightN / tot };
 }
 
 let workerP = null;
@@ -1014,7 +1013,7 @@ async function readRowCells(worker, clean, [y0, y1], cols, stats) {
   // yazısı olup satır okumasında kaçan hücreleri tek tek dene
   for (let k = 0; k < cols.length; k++) {
     const st = stats[k];
-    if (out[k] || st.inkFrac < 0.012 || (st.fill !== 'white' && st.fill !== 'gray')) continue;
+    if (out[k] || st.gray || st.inkFrac < 0.012 || st.fill !== 'white') continue;
     const hgt = y1 - y0; const s = hgt < 40 ? 48 / hgt : 1.5;
     const { c } = crop(clean, cols[k][0], y0, cols[k][1], y1, s);
     out[k] = (await ocr(worker, c, { tessedit_pageseg_mode: '7', tessedit_char_whitelist: '' })).text.trim();
@@ -1150,7 +1149,21 @@ async function analyzeTable(img, progress) {
 
   // 2) İsim sütunu = ilk sütunlardan en genişi; gün sütunları = sağındaki benzer genişlikteki sütunlar
   const widths = colsB.map(([a, b]) => b - a);
-  let nameCol = 0; for (let i = 0; i < Math.min(4, colsB.length); i++) if (widths[i] > widths[nameCol]) nameCol = i;
+  // Tüm hücrelerin rengi. Gri = tablonun beyazından belirgin koyu, renksiz zemin (Excel #D9D9D9, #BFBFBF …).
+  // Gri alanlar okunmaz: isim aranmaz, hücre yazısı alınmaz.
+  const all = rowsB.map(([y0, y1]) => colsB.map(([x0, x1]) => cellStats(px, w, x0, y0, x1, y1)));
+  const lights = all.flat().filter((c) => c.lightFrac > 0.4).map((c) => c.light).sort((a, b) => a - b);
+  const bgV = lights.length ? lights[Math.floor(lights.length * 0.85)] : 1;
+  for (const c of all.flat()) {
+    const plain = c.fill === 'white' || c.fill === 'gray';
+    c.gray = plain && c.lightFrac > 0.45 && bgV - c.light > 0.07;
+    if (plain) c.fill = c.gray ? 'gray' : 'white';
+  }
+  const grayRow = all.map((row) => row.filter((c) => c.gray).length >= row.length * 0.7);
+  const grayCol = colsB.map((_, ci) => { const body = all.filter((_, r) => !grayRow[r]); return body.length > 0 && body.filter((row) => row[ci].gray).length >= body.length * 0.6; });
+  let nameCol = -1;
+  for (let i = 0, seen = 0; i < colsB.length && seen < 4; i++) { if (grayCol[i]) continue; seen++; if (nameCol < 0 || widths[i] > widths[nameCol]) nameCol = i; }
+  if (nameCol < 0) nameCol = 0;
   const right = colsB.map((c, i) => i).filter((i) => i > nameCol);
   const med = right.map((i) => widths[i]).sort((a, b) => a - b)[Math.floor(right.length / 2)] || 1;
   let dayCols = right.filter((i) => widths[i] >= med * 0.55 && widths[i] <= med * 1.8);
@@ -1168,8 +1181,16 @@ async function analyzeTable(img, progress) {
   for (const b of grid.hs) cctx.fillRect(0, b.a - 2, w, b.b - b.a + 5);
   for (const b of grid.vs) cctx.fillRect(b.a - 2, 0, b.b - b.a + 5, h);
 
+  // gri zeminli başlık satırları için: yalnızca gerçekten koyu yazı
+  const cleanDark = document.createElement('canvas'); cleanDark.width = w; cleanDark.height = h;
+  { const c2 = cleanDark.getContext('2d'); const d2 = c2.createImageData(w, h);
+    for (let i = 0, p = 0; i < w * h; i++, p += 4) { const v = Math.max(px[p], px[p + 1], px[p + 2]) < 110 ? 0 : 255; d2.data[p] = d2.data[p + 1] = d2.data[p + 2] = v; d2.data[p + 3] = 255; }
+    c2.putImageData(d2, 0, 0); c2.fillStyle = '#fff';
+    for (const b of grid.hs) c2.fillRect(0, b.a - 2, w, b.b - b.a + 5);
+    for (const b of grid.vs) c2.fillRect(b.a - 2, 0, b.b - b.a + 5, h); }
+
   // 4) Hücre renkleri
-  let stats = rowsB.map(([y0, y1]) => dayCols.map((ci) => cellStats(px, w, colsB[ci][0], y0, colsB[ci][1], y1)));
+  let stats = all.map((row) => dayCols.map((ci) => row[ci]));
 
   // 5) Metin tanıma (isimler, hücre yazıları, başlık)
   let worker = null;
@@ -1191,6 +1212,7 @@ async function analyzeTable(img, progress) {
       const out = [];
       for (let r = 0; r < rowsB.length; r++) {
         progress(`${label} (${r + 1}/${rowsB.length})`, 0.15 + 0.4 * (r / rowsB.length));
+        if (grayRow[r] || all[r][ci].gray) { out.push(''); continue; }
         const [y0, y1] = rowsB[r]; const [x0, x1] = colsB[ci];
         const hgt = y1 - y0; const s = hgt < 40 ? 48 / hgt : 1;
         const { c } = crop(clean, x0, y0, x1, y1, s);
@@ -1204,7 +1226,7 @@ async function analyzeTable(img, progress) {
     if (score(best) < rowsB.length * 0.4) {
       // isim sütunu yanlış seçilmiş olabilir: geniş diğer sütunları dene, en çok isim çıkanı al
       const allMed = widths.slice().sort((a, b) => a - b)[Math.floor(widths.length / 2)];
-      const cands = colsB.map((_, i) => i).filter((i) => i !== nameCol && widths[i] >= allMed * 1.3).slice(0, 4);
+      const cands = colsB.map((_, i) => i).filter((i) => i !== nameCol && !grayCol[i] && widths[i] >= allMed * 1.3).slice(0, 4);
       for (const ci of cands) {
         const got = await readNames(ci, 'İsim sütunu aranıyor');
         if (score(got) > score(best)) { best = got; nameCol = ci; }
@@ -1213,16 +1235,25 @@ async function analyzeTable(img, progress) {
       const right2 = colsB.map((c, i) => i).filter((i) => i > nameCol);
       const med2 = right2.map((i) => widths[i]).sort((a, b) => a - b)[Math.floor(right2.length / 2)] || 1;
       dayCols = right2.filter((i) => widths[i] >= med2 * 0.55 && widths[i] <= med2 * 1.8);
-      stats = rowsB.map(([y0, y1]) => dayCols.map((ci) => cellStats(px, w, colsB[ci][0], y0, colsB[ci][1], y1)));
+      stats = all.map((row) => dayCols.map((ci) => row[ci]));
     }
     names.push(...best);
     if (score(best) < Math.max(1, (rowsB.length - 1) * 0.4)) warnings.push('Bu tablodaki isimler okunamadı; tablo düzeni farklı olabilir. İsim olmayan satırlar kaydedilmeyecek.');
     for (let r = 0; r < rowsB.length; r++) {
       progress(`Hücreler okunuyor (${r + 1}/${rowsB.length})`, 0.55 + 0.42 * (r / rowsB.length));
-      texts.push(await readRowCells(worker, clean, rowsB[r], dayCols.map((ci) => colsB[ci]), stats[r]));
+      if (grayRow[r]) { texts.push(dayCols.map(() => '')); continue; }
+      const t = await readRowCells(worker, clean, rowsB[r], dayCols.map((ci) => colsB[ci]), stats[r]);
+      texts.push(t.map((x, k) => (stats[r][k].gray ? '' : x)));
     }
   } else {
     rowsB.forEach(() => { names.push(''); texts.push(dayCols.map(() => '')); });
+  }
+
+  // Gri ara satırlar (ör. "2. VARDİYA" bandı): yalnızca vardiya numarası için bakılır, isim/hücre okunmaz
+  const sectionShift = rowsB.map(() => '');
+  if (worker) for (let r = 0; r < rowsB.length; r++) if (grayRow[r]) {
+    const [y0, y1] = rowsB[r]; const { c } = crop(cleanDark, colsB[0][0], y0, colsB[colsB.length - 1][1], y1, (y1 - y0) < 40 ? 48 / (y1 - y0) : 1);
+    try { sectionShift[r] = shiftFromTitle((await ocr(worker, c, { tessedit_pageseg_mode: '7', tessedit_char_whitelist: '' })).text); } catch (e) { /* yoksay */ }
   }
 
   // 6) Başlık satırı / kişi satırları
@@ -1234,10 +1265,16 @@ async function analyzeTable(img, progress) {
   // Başlıktaki gün numaraları
   const headerDays = [];
   if (worker && firstPerson > 0) {
-    const [y0, y1] = rowsB[firstPerson - 1];
     const cols = dayCols.map((ci) => colsB[ci]);
-    const txt = await readStrip(worker, clean, y0, y0 + (y1 - y0) * 0.6, cols, '7');
-    txt.forEach((t) => { const n = parseInt(t.replace(/\D/g, '').slice(0, 2), 10); headerDays.push(n >= 1 && n <= 31 ? n : null); });
+    let bestNums = [], bestCnt = -1;
+    for (let r = firstPerson - 1; r >= Math.max(0, firstPerson - 3); r--) {
+      const [y0, y1] = rowsB[r];
+      // tarih başlığı griyse de okunur: koyu yazıyı ayrı eşikle ayıkla
+      const txt = await readStrip(worker, grayRow[r] ? cleanDark : clean, y0, y0 + (y1 - y0) * 0.6, cols, '7');
+      const nums = txt.map((t) => { const n = parseInt(t.replace(/\D/g, '').slice(0, 2), 10); return n >= 1 && n <= 31 ? n : null; });
+      const cnt = nums.filter((n) => n).length; if (cnt > bestCnt) { bestCnt = cnt; bestNums = nums; }
+    }
+    headerDays.push(...bestNums);
     // sondaki gün olmayan sütunları at (Toplam vb.)
     const found = headerDays.filter((n) => n).length;
     if (found >= dayCols.length * 0.6) while (dayCols.length && headerDays[headerDays.length - 1] == null) { dayCols.pop(); headerDays.pop(); stats.forEach((r) => r.pop()); texts.forEach((r) => r.pop()); }
@@ -1280,9 +1317,14 @@ async function analyzeTable(img, progress) {
   const colorMap = store.settings.colors;
   const digitCount = { '1': 0, '2': 0, '3': 0 };
   const rows = [];
+  let section = ''; for (let r = 0; r < firstPerson; r++) if (sectionShift[r]) section = sectionShift[r];
+  const sectionsUsed = new Set();
   for (let r = firstPerson; r < rowsB.length; r++) {
+    if (grayRow[r]) { if (sectionShift[r]) section = sectionShift[r]; continue; }
+    if (all[r][nameCol].gray) continue;
     const cells = dayCols.map((_, k) => {
       const st = stats[r][k]; const raw = texts[r][k] || '';
+      if (st.gray) return { code: '', raw: '', fill: 'gray', gray: true };
       let code = '';
       const mapped = colorMap[st.fill];
       if (st.fill !== 'white' && st.fill !== 'gray' && mapped) code = mapped;
@@ -1295,9 +1337,13 @@ async function analyzeTable(img, progress) {
     const nm = names[r] || (worker ? '' : `Kişi ${r - firstPerson + 1}`);
     const empty = !nm && cells.every((c) => !c.code);
     if (empty) continue;
-    rows.push({ name: nm, skip: !!worker && !looksLikeName(nm), cells });
+    rows.push({ name: nm, skip: !!worker && !looksLikeName(nm), cells, group: section });
+    if (section) sectionsUsed.add(section);
   }
-  if (!group) { const best = Object.entries(digitCount).sort((a, b) => b[1] - a[1])[0]; const nonzero = Object.values(digitCount).filter((n) => n > 0).length; const totalDigits = Object.values(digitCount).reduce((a, b) => a + b, 0);
+  // tabloda vardiya bölümleri varsa (gri bantlar) satırlar kendi vardiyasını taşır
+  if (sectionsUsed.size > 1) group = '';
+  else if (sectionsUsed.size === 1 && !group) group = [...sectionsUsed][0];
+  if (!group && !sectionsUsed.size) { const best = Object.entries(digitCount).sort((a, b) => b[1] - a[1])[0]; const nonzero = Object.values(digitCount).filter((n) => n > 0).length; const totalDigits = Object.values(digitCount).reduce((a, b) => a + b, 0);
     // OCR birkaç rakamı yanlış okusa da baskın vardiya (%80+) tablonun vardiyasıdır
     if (best[1] && (nonzero === 1 || best[1] >= totalDigits * 0.8)) group = best[0]; else if (!best[1]) { group = '1'; groupDefault = true; } }
   // Yazısız beyaz hücreler = listenin vardiyası (kaydederken de uygulanır)

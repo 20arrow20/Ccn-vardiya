@@ -526,14 +526,17 @@ function mergedReview() {
   return { rows: order, dates };
 }
 
+// İşaretlenmemiş satır: kullanıcı seçmediyse isim gibi görünmeyenler alınmaz
+function isSkipped(m) { const v = ui.review.skip[m.key]; return v === undefined ? !looksLikeName(m.name) : v; }
+
 function viewReview() {
   const R = ui.review; const M = mergedReview();
   const head = M.dates.map((d) => { const dt = parseIso(d); return `<th>${pad(dt.getDate())}<small>${pad(dt.getMonth() + 1)}.${dt.getFullYear() % 100}</small></th>`; }).join('');
-  const rows = M.rows.map((m) => { const skip = !!R.skip[m.key]; return `<tr class="${skip ? 'skip' : ''}">
+  const rows = M.rows.map((m) => { const skip = isSkipped(m); return `<tr class="${skip ? 'skip' : ''}">
     <td><input type="checkbox" data-act="rv-skip" data-key="${esc(m.key)}" ${skip ? '' : 'checked'} aria-label="Bu kişiyi al"></td>
     <td class="name rv"><div class="rvn"><input type="text" data-act="rv-name" data-key="${esc(m.key)}" value="${esc(m.name)}" placeholder="Ad soyad yazın" aria-label="Ad soyad">${[...m.groups].map((g) => `<span class="gtag k-${g}">${g}</span>`).join('')}${m.files.size > 1 ? `<span class="small muted nowrap">${m.files.size} görsel</span>` : ''}</div></td>
     ${M.dates.map((d) => { const c = m.cells[d] || { code: '' }; const k = CODES[c.code] ? c.code : 'Q'; return `<td><button class="code k-${k}" data-act="rv-cell" data-key="${esc(m.key)}" data-date="${d}" title="${c.raw ? 'Okunan: ' + esc(c.raw) : ''}${c.fill && c.fill !== 'white' && c.fill !== 'gray' ? ' Renk: ' + (COLOR_NAMES[c.fill] || c.fill) : ''}">${CODES[c.code] ? CODES[c.code].short : '?'}</button></td>`; }).join('')}</tr>`; }).join('');
-  const people = M.rows.filter((m) => !R.skip[m.key] && m.name).length;
+  const people = M.rows.filter((m) => !isSkipped(m) && m.name).length;
   const warn = R.parts.flatMap((P) => P.warnings.map((w) => `<div class="note"><b>${esc(P.file)}:</b> ${esc(w)}</div>`)).join('');
   const parts = R.parts.map((P) => `<div class="part">
       <canvas id="rv-cv-${P.id}" class="thumb"></canvas>
@@ -580,7 +583,7 @@ function viewSettings() {
   <div class="card stack">
     <h2 style="font-size:22px">Veri</h2>
     <p class="small muted" style="margin:0">Veriler yalnızca bu cihazda saklanır. Başka telefona aktarmak için yedeği kopyalayıp diğer cihazda “Yedekten yükle”ye yapıştırın.</p>
-    <div class="row"><button class="btn" data-act="backup">Yedeği kopyala</button><button class="btn" data-act="restore-open">Yedekten yükle</button><button class="btn" data-act="load-demo">Örnek veriyi yükle</button><button class="btn danger" data-act="wipe">Tüm verileri sil</button></div>
+    <div class="row"><button class="btn" data-act="backup">Yedeği kopyala</button><button class="btn" data-act="restore-open">Yedekten yükle</button><button class="btn" data-act="load-demo">Örnek veriyi yükle</button><button class="btn" data-act="clean-bad">Hatalı isimleri temizle</button><button class="btn danger" data-act="wipe">Tüm verileri sil</button></div>
   </div>`;
 }
 
@@ -662,6 +665,13 @@ const actions = {
   'backup': async () => { const txt = JSON.stringify(store); try { await navigator.clipboard.writeText(txt); toast('Yedek panoya kopyalandı'); } catch (e) { showText('Yedek', 'Aşağıdaki metnin tamamını seçip kopyalayın:', txt); } },
   'restore-open': () => restoreSheet(),
   'load-demo': () => confirmSheet('Örnek veri yüklensin mi?', 'Mevcut tüm vardiya verileri silinir ve yerine örnek veri gelir.', 'Örnek veriyi yükle', () => { store = makeDemo(); save(); render(); }),
+  'clean-bad': () => {
+    const bad = Object.entries(store.people).filter(([, p]) => !looksLikeName(p.name));
+    if (!bad.length) { toast('Hatalı isim yok'); return; }
+    confirmSheet(`${bad.length} hatalı kayıt silinsin mi?`, `Ad soyad gibi görünmeyen kayıtlar silinecek: ${bad.slice(0, 12).map(([, p]) => p.name || '(boş)').join(', ')}${bad.length > 12 ? '…' : ''}`, 'Sil', () => {
+      bad.forEach(([k]) => { delete store.people[k]; renameDayAreas(k, null); }); save(); render(); toast(`${bad.length} hatalı kayıt silindi`);
+    });
+  },
   'wipe': () => confirmSheet('Tüm veriler silinsin mi?', 'Yüklenen bütün listeler ve kişiler bu cihazdan silinir. Bu işlem geri alınamaz.', 'Hepsini sil', () => { store = defaultStore(); save(); render(); toast('Tüm veriler silindi'); }),
 };
 
@@ -758,8 +768,8 @@ function renameReviewRow(key, value) {
 function saveReview() {
   const R = ui.review; if (!R) { go('gunluk'); return; }
   const M = mergedReview();
-  const rows = M.rows.filter((m) => !R.skip[m.key] && m.name);
-  if (!rows.length) { toast('Kaydedilecek kişi yok'); return; }
+  const rows = M.rows.filter((m) => !isSkipped(m) && m.name);
+  if (!rows.length) { toast('Kaydedilecek kişi yok. İsimleri yazın ya da satırları işaretleyin.'); return; }
   if (store.demo) { store.people = {}; store.uploads = []; store.dayAreas = {}; store.demo = false; }
   for (const m of rows) {
     const k = nameKey(m.name);
@@ -836,6 +846,14 @@ function loadImg(file) {
     im.onload = () => res(im); im.onerror = () => rej(new Error('Dosya bir görsel değil'));
     im.src = url;
   });
+}
+
+// "Ad Soyad" gibi görünüyor mu: en az iki kelime, toplam 5+ harf, vardiya kodu değil
+function looksLikeName(s) {
+  const t = String(s || '').trim();
+  if (/^(OFF|0FF|R|RE|RP|RAPOR|Y[İI]|[İI]Z[İI]N|[123]|AD SOYAD|ADI SOYADI)$/i.test(t)) return false;
+  const words = t.split(/\s+/).map((w) => w.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, '')).filter((w) => w.length >= 2);
+  return words.length >= 2 && words.join('').length >= 5;
 }
 
 // Başlıktan vardiya: "1. VARDİYA", "I. VARDİYA", "SABAH", "08:00-16:00" …
@@ -1151,7 +1169,7 @@ async function analyzeTable(img, progress) {
   for (const b of grid.vs) cctx.fillRect(b.a - 2, 0, b.b - b.a + 5, h);
 
   // 4) Hücre renkleri
-  const stats = rowsB.map(([y0, y1]) => dayCols.map((ci) => cellStats(px, w, colsB[ci][0], y0, colsB[ci][1], y1)));
+  let stats = rowsB.map(([y0, y1]) => dayCols.map((ci) => cellStats(px, w, colsB[ci][0], y0, colsB[ci][1], y1)));
 
   // 5) Metin tanıma (isimler, hücre yazıları, başlık)
   let worker = null;
@@ -1169,14 +1187,36 @@ async function analyzeTable(img, progress) {
       const { c } = crop(clean, 0, 0, w, tableTop, 1);
       try { title = (await ocr(worker, c, { tessedit_pageseg_mode: '6', tessedit_char_whitelist: '' })).text; } catch (e) { /* başlık isteğe bağlı */ }
     }
-    for (let r = 0; r < rowsB.length; r++) {
-      progress(`İsimler okunuyor (${r + 1}/${rowsB.length})`, 0.15 + 0.4 * (r / rowsB.length));
-      const [y0, y1] = rowsB[r]; const [x0, x1] = colsB[nameCol];
-      const hgt = y1 - y0; const s = hgt < 40 ? 48 / hgt : 1;
-      const { c } = crop(clean, x0, y0, x1, y1, s);
-      const d = await ocr(worker, c, { tessedit_pageseg_mode: '7', tessedit_char_whitelist: '' });
-      names.push(d.text.replace(/[Ââ]/g, (c) => (c === 'Â' ? 'A' : 'a')).replace(/[Ûû]/g, (c) => (c === 'Û' ? 'U' : 'u')).replace(/[^A-Za-zÇĞİÖŞÜçğıöşüÂÎÛâîû .'-]/g, ' ').replace(/\s+/g, ' ').trim());
+    const readNames = async (ci, label) => {
+      const out = [];
+      for (let r = 0; r < rowsB.length; r++) {
+        progress(`${label} (${r + 1}/${rowsB.length})`, 0.15 + 0.4 * (r / rowsB.length));
+        const [y0, y1] = rowsB[r]; const [x0, x1] = colsB[ci];
+        const hgt = y1 - y0; const s = hgt < 40 ? 48 / hgt : 1;
+        const { c } = crop(clean, x0, y0, x1, y1, s);
+        const d = await ocr(worker, c, { tessedit_pageseg_mode: '7', tessedit_char_whitelist: '' });
+        out.push(d.text.replace(/[Ââ]/g, (c) => (c === 'Â' ? 'A' : 'a')).replace(/[Ûû]/g, (c) => (c === 'Û' ? 'U' : 'u')).replace(/[^A-Za-zÇĞİÖŞÜçğıöşüÂÎÛâîû .'-]/g, ' ').replace(/\s+/g, ' ').trim());
+      }
+      return out;
+    };
+    const score = (arr) => arr.filter(looksLikeName).length;
+    let best = await readNames(nameCol, 'İsimler okunuyor');
+    if (score(best) < rowsB.length * 0.4) {
+      // isim sütunu yanlış seçilmiş olabilir: geniş diğer sütunları dene, en çok isim çıkanı al
+      const allMed = widths.slice().sort((a, b) => a - b)[Math.floor(widths.length / 2)];
+      const cands = colsB.map((_, i) => i).filter((i) => i !== nameCol && widths[i] >= allMed * 1.3).slice(0, 4);
+      for (const ci of cands) {
+        const got = await readNames(ci, 'İsim sütunu aranıyor');
+        if (score(got) > score(best)) { best = got; nameCol = ci; }
+      }
+      // gün sütunlarını yeni isim sütununa göre yeniden belirle
+      const right2 = colsB.map((c, i) => i).filter((i) => i > nameCol);
+      const med2 = right2.map((i) => widths[i]).sort((a, b) => a - b)[Math.floor(right2.length / 2)] || 1;
+      dayCols = right2.filter((i) => widths[i] >= med2 * 0.55 && widths[i] <= med2 * 1.8);
+      stats = rowsB.map(([y0, y1]) => dayCols.map((ci) => cellStats(px, w, colsB[ci][0], y0, colsB[ci][1], y1)));
     }
+    names.push(...best);
+    if (score(best) < Math.max(1, (rowsB.length - 1) * 0.4)) warnings.push('Bu tablodaki isimler okunamadı; tablo düzeni farklı olabilir. İsim olmayan satırlar kaydedilmeyecek.');
     for (let r = 0; r < rowsB.length; r++) {
       progress(`Hücreler okunuyor (${r + 1}/${rowsB.length})`, 0.55 + 0.42 * (r / rowsB.length));
       texts.push(await readRowCells(worker, clean, rowsB[r], dayCols.map((ci) => colsB[ci]), stats[r]));
@@ -1255,7 +1295,7 @@ async function analyzeTable(img, progress) {
     const nm = names[r] || (worker ? '' : `Kişi ${r - firstPerson + 1}`);
     const empty = !nm && cells.every((c) => !c.code);
     if (empty) continue;
-    rows.push({ name: nm, skip: !nm && !!worker, cells });
+    rows.push({ name: nm, skip: !!worker && !looksLikeName(nm), cells });
   }
   if (!group) { const best = Object.entries(digitCount).sort((a, b) => b[1] - a[1])[0]; const nonzero = Object.values(digitCount).filter((n) => n > 0).length; const totalDigits = Object.values(digitCount).reduce((a, b) => a + b, 0);
     // OCR birkaç rakamı yanlış okusa da baskın vardiya (%80+) tablonun vardiyasıdır

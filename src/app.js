@@ -518,23 +518,20 @@ function viewUpload() {
 // Birden çok görselin satırlarını isme göre birleştir: aynı kişi farklı görsellerde/tarihlerde olabilir
 function mergedReview() {
   const R = ui.review; const map = new Map(); const order = [];
-  const add = (src, rawName, group, cells) => {
+  const add = (src, rawName, group, cells, ai) => {
     let name = String(R.names[src] ?? rawName).trim().replace(/\s+/g, ' ');
-    // daha önce elle düzeltilmiş bir okuma ise doğru isme çevir
+    // kayıtlı kişiyle eşleşme: elle düzeltilmiş isim her zaman kazanır; Claude okuması düzeltilmemiş eski kaydı geçer
     if (R.names[src] === undefined && name && !store.demo) {
       const al = (store.aliases || {})[nameKey(name)];
-      if (al && store.people[al]) name = store.people[al].name;
-      else {
-        // kayıtlı kişiyle eşleşiyorsa kayıtlı (düzeltilmiş) ismi kullan
-        const ex = store.people[nameKey(name)] ? nameKey(name) : Object.keys(store.people).find((k) => sameish(store.people[k].name, name));
-        if (ex) name = store.people[ex].name;
-      }
+      const ex = al && store.people[al] ? al : store.people[nameKey(name)] ? nameKey(name) : Object.keys(store.people).find((k) => sameish(store.people[k].name, name));
+      if (ex && (store.people[ex].fixed || !ai)) name = store.people[ex].name;
     }
     let key = name ? nameKey(name) : '?' + src;
     if (name && !map.has(key)) { const sim = order.find((x) => x.name && sameish(x.name, name)); if (sim) key = sim.key; }
     let m = map.get(key);
     if (!m) { m = { key, name, srcs: [], groups: new Set(), files: new Set(), cells: {} }; map.set(key, m); order.push(m); }
     m.srcs.push(src); m.raws = m.raws || []; m.raws.push(rawName); if (group) m.groups.add(group);
+    if (ai) m.ai = true; if (R.names[src] !== undefined) m.edited = true;
     for (const [d, c] of Object.entries(cells)) {
       const o = m.cells[d];
       // zayıf bilgi = tablonun kendi vardiyası (boş hücre ya da kendi numarası); OFF/rapor/izin/başka vardiya güçlüdür
@@ -545,7 +542,7 @@ function mergedReview() {
   for (const P of R.parts) P.rows.forEach((row, ri) => {
     const cells = {}; const g = row.group || P.group;
     row.cells.forEach((c, ci) => { let code = c.code; const implied = !code && !!g && !c.raw && !c.gray; if (implied) code = g; cells[addDays(P.start, ci)] = { code, raw: c.raw, fill: c.fill, implied, weak: implied || (!!g && code === g) }; });
-    add(`${P.id}:${ri}`, row.name, g, cells).files.add(P.file);
+    add(`${P.id}:${ri}`, row.name, g, cells, row.ai).files.add(P.file);
   });
   R.extra.forEach((id) => add(`x:${id}`, '', '', {}));
   for (const m of order) for (const [d, code] of Object.entries(R.cellEdits[m.key] || {})) m.cells[d] = { code, raw: '', fill: '', edited: true };
@@ -567,6 +564,10 @@ function viewReview() {
     ${M.dates.map((d) => { const c = m.cells[d] || { code: '' }; const k = CODES[c.code] ? c.code : 'Q'; return `<td><button class="code k-${k}" data-act="rv-cell" data-key="${esc(m.key)}" data-date="${d}" title="${c.raw ? 'Okunan: ' + esc(c.raw) : ''}${c.fill && c.fill !== 'white' && c.fill !== 'gray' ? ' Renk: ' + (COLOR_NAMES[c.fill] || c.fill) : ''}">${CODES[c.code] ? CODES[c.code].short : '?'}</button></td>`; }).join('')}</tr>`; }).join('');
   const people = M.rows.filter((m) => !isSkipped(m) && m.name).length;
   const warn = R.parts.flatMap((P) => P.warnings.map((w) => `<div class="note"><b>${esc(P.file)}:</b> ${esc(w)}</div>`)).join('');
+  const cs = R.parts.map((P) => P.claude || { status: 'off' });
+  const claudeNote = !window.claude ? '' : cs.every((c) => c.status === 'ok')
+    ? `<div class="aiok">${ICON_CHECK}<span>İsimler Claude ile okundu. Yanlış bir isim görürseniz üzerine dokunup düzeltin; düzeltme hatırlanır.</span></div>`
+    : `<div class="aibad"><span><b>İsimler Claude ile okunamadı</b>${cs.find((c) => c.code) ? ` (${esc(cs.find((c) => c.code).code)})` : ''}; daha zayıf olan cihaz okuması kullanıldı. Claude'a izin verip görselleri yeniden yükleyin.</span><button class="btn" data-act="perm-manage">İzinleri aç</button></div>`;
   const parts = R.parts.map((P) => `<div class="part">
       <canvas id="rv-cv-${P.id}" class="thumb"></canvas>
       <div class="stack" style="gap:8px;min-width:0">
@@ -582,6 +583,7 @@ function viewReview() {
   return `<div class="card stack">
     <div class="row"><div style="flex:1;min-width:0"><div class="eyebrow">Kontrol et ve düzelt</div><h2 style="font-size:24px">${R.parts.length} görsel · ${people} kişi</h2></div>
       <button class="btn" data-act="rv-cancel">Vazgeç</button><button class="btn primary" data-act="rv-save">${ICON_CHECK}Hepsini kaydet</button></div>
+    ${claudeNote}
     <p class="small muted" style="margin:0">Tüm görsellerdeki isimler tek listede toplandı. Aynı isim birden fazla görselde varsa tek satırda birleşir. Hücreye dokunarak değiştirin; “?” okunamayan hücredir.</p>
     ${warn}
     <div class="parts">${parts}
@@ -693,6 +695,10 @@ const actions = {
   'rv-remove': (el) => { ui.review.parts = ui.review.parts.filter((P) => P.id !== el.dataset.id); if (!ui.review.parts.length) ui.review = null; render(); },
   'rv-cancel': () => { ui.review = null; queue = []; render(); },
   'rv-save': () => saveReview(),
+  'perm-manage': async () => {
+    try { const pm = await window.claude.use('permissions'); if (pm) { await pm.request(['sample']).catch(() => {}); samplerP = null; toast('İzin verildiyse görselleri yeniden yükleyin'); return; } } catch (e) { /* yoksay */ }
+    toast('Sayfanın üst menüsünden İzinler bölümünü açın');
+  },
   'backup': async () => { const txt = JSON.stringify(store); try { await navigator.clipboard.writeText(txt); toast('Yedek panoya kopyalandı'); } catch (e) { showText('Yedek', 'Aşağıdaki metnin tamamını seçip kopyalayın:', txt); } },
   'restore-open': () => restoreSheet(),
   'load-demo': () => confirmSheet('Örnek veri yüklensin mi?', 'Mevcut tüm vardiya verileri silinir ve yerine örnek veri gelir.', 'Örnek veriyi yükle', () => { store = makeDemo(); save(); render(); }),
@@ -746,6 +752,7 @@ function personSheet(key) {
       const nk = nameKey(name);
       if (key && nk !== key) { store.people[nk] = { ...store.people[key], ...(store.people[nk] || {}), name, group, area, days: { ...store.people[key].days, ...((store.people[nk] || {}).days) } }; delete store.people[key]; renameDayAreas(key, nk); store.aliases = store.aliases || {}; store.aliases[key] = nk; for (const [a, t] of Object.entries(store.aliases)) if (t === key) store.aliases[a] = nk; }
       else store.people[nk] = { ...(store.people[nk] || p), name, group, area };
+      if (key && name !== p.name) store.people[nk].fixed = true;
       store.demo = false; save(); closeSheet(); render();
     });
     const del = bg.querySelector('#ps-del');
@@ -804,9 +811,22 @@ function saveReview() {
   if (store.demo) { store.people = {}; store.uploads = []; store.dayAreas = {}; store.demo = false; }
   for (const m of rows) {
     let k = nameKey(m.name);
-    if (!store.people[k]) { const sim = Object.keys(store.people).find((ek) => sameish(store.people[ek].name, m.name)); if (sim) k = sim; }
-    const p = store.people[k] || { name: m.name, group: '', days: {} };
-    if (k === nameKey(m.name)) p.name = m.name;
+    if (!store.people[k]) {
+      const al = (store.aliases || {})[k];
+      const sim = al && store.people[al] ? al : Object.keys(store.people).find((ek) => sameish(store.people[ek].name, m.name));
+      if (sim) k = sim;
+    }
+    let p = store.people[k] || { name: m.name, group: '', days: {} };
+    const nk = nameKey(m.name);
+    if (store.people[k] && k !== nk && (m.edited || (m.ai && !p.fixed))) {
+      // eski kayıt yanlış okunmuştu: doğru isme taşı, eski okuma hafızaya
+      delete store.people[k]; renameDayAreas(k, nk);
+      store.aliases = store.aliases || {}; store.aliases[k] = nk; for (const [a, t] of Object.entries(store.aliases)) if (t === k) store.aliases[a] = nk;
+      if (store.people[nk]) p = { ...store.people[nk], days: { ...p.days, ...store.people[nk].days } };
+      k = nk;
+    }
+    if (m.edited) p.fixed = true;
+    if (k === nk && (m.edited || m.ai || !p.fixed)) p.name = m.name;
     p.imp = p.imp || {};
     for (const [d, c] of Object.entries(m.cells)) {
       if (CODES[c.code] && c.code) {
@@ -872,7 +892,7 @@ async function analyzeFile(file) {
         if (last) { res.start = last.start; res.warnings = res.warnings.filter((w) => !/tarih/i.test(w)); res.warnings.push(`Tarih bulunamadı; ${prev ? 'önceki tablonun' : 'son yüklenen listenin'} tarihleri kullanıldı.`); }
       }
       const name = (file.name || 'Liste') + (results.length > 1 ? ` · tablo ${res.table}` : '');
-      ui.review.parts.push({ id: uid(), file: name, start: res.start, group: res.group, ncols: res.cols.length, preview: res.preview, rows: res.rows, warnings: res.warnings });
+      ui.review.parts.push({ id: uid(), file: name, start: res.start, group: res.group, ncols: res.cols.length, preview: res.preview, rows: res.rows, warnings: res.warnings, claude: res.claude });
     }
   } catch (e) {
     console.error(e);
@@ -1066,26 +1086,27 @@ function getSampler() {
   }).catch(() => null);
   return samplerP;
 }
+let claudeStatus = { status: 'off' };
 async function readNamesWithClaude(src, rowsB, [x0, x1], include, progress) {
-  const S = await getSampler(); if (!S) return null;
+  const S = await getSampler(); if (!S) { claudeStatus = { status: 'off' }; return null; }
   const idx = rowsB.map((_, r) => r).filter((r) => include[r]); if (!idx.length) return null;
   // satır yüksekliği ~34 px, en fazla ~1.1 megapiksel görsel başına
-  const rh = 34, label = 44; const cw = x1 - x0;
+  const rh = 48, label = 48; const cw = x1 - x0;
   const imgs = []; let chunk = [];
   const flush = () => {
     if (!chunk.length) return;
-    const width = Math.min(900, label + Math.round(cw * rh / Math.max(1, (rowsB[chunk[0]][1] - rowsB[chunk[0]][0])))) ;
+    const width = Math.min(1000, label + Math.round(cw * rh / Math.max(1, (rowsB[chunk[0]][1] - rowsB[chunk[0]][0]))));
     const c = document.createElement('canvas'); c.width = width; c.height = chunk.length * (rh + 6) + 6;
     const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.imageSmoothingQuality = 'high';
     chunk.forEach((r, i) => {
       const [y0, y1] = rowsB[r]; const y = 6 + i * (rh + 6);
-      g.fillStyle = '#000'; g.font = 'bold 18px sans-serif'; g.fillText(String(r + 1), 6, y + rh * 0.72);
+      g.fillStyle = '#000'; g.font = 'bold 20px sans-serif'; g.fillText(String(r + 1), 6, y + rh * 0.68);
       g.drawImage(src, x0, y0, cw, y1 - y0, label, y, width - label - 4, rh);
       g.strokeStyle = '#999'; g.strokeRect(label - 2, y - 1, width - label, rh + 2);
     });
     imgs.push(c); chunk = [];
   };
-  for (const r of idx) { chunk.push(r); if ((chunk.length + 1) * 40 * 900 > 1100000) flush(); }
+  for (const r of idx) { chunk.push(r); if ((chunk.length + 1) * (rh + 6) * 1000 > 1100000) flush(); }
   flush();
   progress('İsimler Claude ile okunuyor', 0.5);
   const out = rowsB.map(() => null);
@@ -1101,8 +1122,9 @@ async function readNamesWithClaude(src, rowsB, [x0, x1], include, progress) {
         { images: blobs.length === 1 ? blobs[0] : blobs });
       if (res && typeof res === 'object') for (const [k, v] of Object.entries(res)) { const r = parseInt(k, 10) - 1; if (r >= 0 && r < out.length && typeof v === 'string') out[r] = v.replace(/\s+/g, ' ').trim(); }
     }
+    claudeStatus = { status: 'ok' };
   } catch (e) {
-    console.warn('Claude isim okuma', e && e.code);
+    console.warn('Claude isim okuma', e && e.code); claudeStatus = { status: 'err', code: e && e.code };
     if (e && ['not_granted', 'sampling_disabled', 'images_unavailable', 'capability_disabled', 'not_declared'].includes(e.code)) samplerP = Promise.resolve(null);
     return out.some((x) => x != null) ? out : null;
   }
@@ -1398,7 +1420,7 @@ async function analyzeTable(img, progress) {
   }
   catch (e) { console.warn(e); warnings.push('Metin tanıma bu cihazda çalışmadı; isimleri elle yazmanız gerekiyor. Renkler (OFF) yine de okundu.'); }
 
-  const names = [], texts = [];
+  const names = [], texts = []; let aiRow = null; let claudeInfo = { status: 'off' };
   let title = '';
   if (worker) {
     if (tableTop > 20) {
@@ -1449,8 +1471,10 @@ async function analyzeTable(img, progress) {
     }
     names.push(...best);
     // claude.ai'de açıldıysa isimleri Claude okur (çok daha doğru); olmazsa cihazdaki okuma kalır
+    aiRow = rowsB.map(() => false);
     const ai = await readNamesWithClaude(cv, rowsB, colsB[nameCol], rowsB.map((_, r) => !(grayRow[r] || all[r][nameCol].gray)), progress);
-    if (ai) { ai.forEach((t, r) => { if (t != null) names[r] = t; }); best = names.slice(); if (ai.some((t) => t)) warnings.push('İsimler Claude ile okundu. Yine de yanlış bir isim görürseniz üzerine dokunup düzeltin; düzeltme hatırlanır.'); }
+    if (ai) { ai.forEach((t, r) => { if (t != null) { names[r] = t; aiRow[r] = true; } }); best = names.slice(); }
+    claudeInfo = claudeStatus;
     if (score(best) < Math.max(1, (rowsB.length - 1) * 0.4)) warnings.push('Bu tablodaki isimler okunamadı; tablo düzeni farklı olabilir. İsim olmayan satırlar kaydedilmeyecek.');
     for (let r = 0; r < rowsB.length; r++) {
       progress(`Hücreler okunuyor (${r + 1}/${rowsB.length})`, 0.55 + 0.42 * (r / rowsB.length));
@@ -1550,7 +1574,7 @@ async function analyzeTable(img, progress) {
     const nm = names[r] || (worker ? '' : `Kişi ${r - firstPerson + 1}`);
     const empty = !nm && cells.every((c) => !c.code);
     if (empty) continue;
-    rows.push({ name: nm, skip: !!worker && !looksLikeName(nm), cells, group: section, _r: r });
+    rows.push({ name: nm, skip: !!worker && !looksLikeName(nm), cells, group: section, _r: r, ai: !!(aiRow && aiRow[r]) });
     if (section) sectionsUsed.add(section);
   }
   // okunamayan ("?") hücreler: claude.ai'de Claude okur
@@ -1569,7 +1593,7 @@ async function analyzeTable(img, progress) {
   // Yazısız beyaz hücreler = listenin vardiyası (kaydederken de uygulanır)
   if (!rows.length) warnings.push('Hiç kişi satırı bulunamadı. “Satır ekle” ile elle ekleyebilirsiniz.');
   progress('Bitti', 1);
-  return { start, group, cols: dayCols, rows, warnings, preview, dateFound, groupFound: !groupDefault };
+  return { start, group, cols: dayCols, rows, warnings, preview, dateFound, groupFound: !groupDefault, claude: claudeInfo };
 }
 
 // ---------- İkonlar ----------

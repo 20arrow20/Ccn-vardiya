@@ -37,7 +37,10 @@ const fmtShort = (s) => { const d = parseIso(s); return `${pad(d.getDate())}.${p
 const dayName = (s) => DAY_NAMES[parseIso(s).getDay()];
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const nameKey = (s) => String(s).toLocaleLowerCase('tr').replace(/[^a-zçğıöşüâîû]/g, '');
+// İsim eşleştirme anahtarı: büyük/küçük harf ve Türkçe karakter farkları (ı/i, ş/s, ğ/g…) yok sayılır,
+// böylece farklı görsellerde biraz farklı okunan aynı isim tek kişide birleşir.
+const FOLD = { ç: 'c', ğ: 'g', ı: 'i', ö: 'o', ş: 's', ü: 'u', â: 'a', î: 'i', û: 'u' };
+const nameKey = (s) => String(s).toLocaleLowerCase('tr').replace(/[çğıöşüâîû]/g, (c) => FOLD[c]).replace(/[^a-z]/g, '');
 const uid = () => Math.random().toString(36).slice(2, 10);
 const cmpName = (a, b) => a.name.localeCompare(b.name, 'tr');
 
@@ -53,7 +56,7 @@ function defaultAreas() {
 }
 function defaultStore() {
   return {
-    v: 1, demo: false,
+    v: 1, keyV: 2, demo: false,
     people: {},           // key -> { name, group: '1'|'2'|'3'|'', days: { 'YYYY-MM-DD': code } }
     uploads: [],          // { id, at, group, start, days, count, file }
     areas: defaultAreas(), // görev alanları: { id, name, shifts: ['1','2','3'] }
@@ -69,9 +72,18 @@ let store = load();
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) { const s = JSON.parse(raw); const d = defaultStore(); return { ...d, ...s, areas: Array.isArray(s.areas) ? s.areas : d.areas, dayAreas: s.dayAreas || {}, settings: { ...d.settings, ...s.settings, hours: { ...d.settings.hours, ...(s.settings || {}).hours }, colors: { ...d.settings.colors, ...(s.settings || {}).colors } } }; }
+    if (raw) { const s = migrateKeys(JSON.parse(raw)); const d = defaultStore(); return { ...d, ...s, areas: Array.isArray(s.areas) ? s.areas : d.areas, dayAreas: s.dayAreas || {}, settings: { ...d.settings, ...s.settings, hours: { ...d.settings.hours, ...(s.settings || {}).hours }, colors: { ...d.settings.colors, ...(s.settings || {}).colors } } }; }
   } catch (e) { /* depolama yoksa örnek veriyle devam */ }
   return makeDemo();
+}
+// Eski sürümde kişiler farklı anahtarla tutuluyordu: yeni anahtara taşı
+function migrateKeys(s) {
+  if (s.keyV === 2 || !s.people) return s;
+  const people = {}; const map = {};
+  for (const [k, p] of Object.entries(s.people)) { const nk = nameKey(p.name); map[k] = nk; people[nk] = people[nk] ? { ...people[nk], days: { ...people[nk].days, ...p.days } } : p; }
+  const dayAreas = {};
+  for (const [d, m] of Object.entries(s.dayAreas || {})) { dayAreas[d] = {}; for (const [k, a] of Object.entries(m)) dayAreas[d][map[k] || k] = a; }
+  return { ...s, people, dayAreas, keyV: 2 };
 }
 function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) { /* yoksay */ } }
 
@@ -407,54 +419,83 @@ function viewGrid() {
 
 // ---------- Yükleme / inceleme ----------
 function viewUpload() {
-  if (ui.busy) return `<div class="card stack"><h2>Liste okunuyor…</h2><p class="muted">${esc(ui.busy.text)}</p><div class="progress"><i style="width:${Math.round(ui.busy.pct * 100)}%"></i></div><p class="small muted">İlk okumada metin tanıma modeli yüklenir; birkaç saniye sürebilir.</p></div>`;
+  if (ui.busy) return `<div class="card stack"><h2>Görseller okunuyor…</h2><p class="muted">${esc(ui.busy.text)}</p><div class="progress"><i style="width:${Math.round(ui.busy.pct * 100)}%"></i></div><p class="small muted">İlk okumada metin tanıma modeli yüklenir; birkaç saniye sürebilir.</p></div>`;
   if (ui.review) return viewReview();
   const ups = store.uploads.slice().reverse();
   return `<div class="card stack">
     <div><div class="eyebrow">Her 2 haftada bir</div><h2 style="font-size:24px">Vardiya listesi yükle</h2></div>
     <label class="drop" id="drop" for="file-in">
       ${ICON_IMAGE}
-      <b>Liste görselini seçin veya buraya sürükleyin</b>
-      <span class="small muted">JPG / PNG ekran görüntüsü veya fotoğraf. Birden fazla seçebilirsiniz (1., 2., 3. vardiya listeleri).</span>
-      <span class="btn primary">${ICON_UPLOAD}Dosyadan seç</span>
+      <b>Liste görsellerini seçin veya buraya sürükleyin</b>
+      <span class="small muted">Birden fazla görseli birlikte seçin (1., 2., 3. vardiya ya da aynı listenin parçaları). Hepsi okunur, isimler tek listede toplanır.</span>
+      <span class="btn primary">${ICON_UPLOAD}Görselleri seç</span>
     </label>
     <input type="file" id="file-in" accept="image/*" multiple hidden>
     <div class="note">Program tablodaki çizgileri bulur, her satırdan <b>ad soyad</b>ı okur, <b>kırmızı hücreleri OFF</b> sayar; hücrelerdeki <b>R</b> (rapor), <b>Yİ</b> (yıllık izin) ve 1/2/3 yazılarını tanır. Kaydetmeden önce her şeyi kontrol edip düzeltebilirsiniz.</div>
     <div class="row"><span class="small muted">Denemek için örnek görseller:</span>
-      <button class="btn" data-act="sample" data-n="1">1. vardiya örneği</button>
-      <button class="btn" data-act="sample" data-n="2">2. vardiya örneği</button>
-      <button class="btn" data-act="sample" data-n="3">3. vardiya örneği</button></div>
+      <button class="btn" data-act="sample" data-n="all">3 örnek görseli birlikte yükle</button>
+      <button class="btn" data-act="sample" data-n="1">Sadece 1. vardiya örneği</button></div>
   </div>
   <div class="card stack"><h3 style="font-size:19px">Yüklenen listeler</h3>
     ${ups.length ? `<ul class="uploads">${ups.map((u) => `<li><span class="gtag k-${u.group || ''}" style="margin:0">${u.group ? u.group + '. vardiya' : 'Karışık'}</span><span>${fmtShort(u.start)} – ${fmtShort(addDays(u.start, u.days - 1))}</span><span class="muted small">${u.count} kişi · ${esc(u.file || '')}</span></li>`).join('')}</ul>` : `<p class="muted small">Henüz liste yüklenmedi.</p>`}
   </div>`;
 }
 
+// Birden çok görselin satırlarını isme göre birleştir: aynı kişi farklı görsellerde/tarihlerde olabilir
+function mergedReview() {
+  const R = ui.review; const map = new Map(); const order = [];
+  const add = (src, rawName, group, cells) => {
+    const name = String(R.names[src] ?? rawName).trim().replace(/\s+/g, ' ');
+    const key = name ? nameKey(name) : '?' + src;
+    let m = map.get(key);
+    if (!m) { m = { key, name, srcs: [], groups: new Set(), files: new Set(), cells: {} }; map.set(key, m); order.push(m); }
+    m.srcs.push(src); if (group) m.groups.add(group);
+    for (const [d, c] of Object.entries(cells)) m.cells[d] = c;
+    return m;
+  };
+  for (const P of R.parts) P.rows.forEach((row, ri) => {
+    const cells = {};
+    row.cells.forEach((c, ci) => { let code = c.code; if (!code && P.group && !c.raw) code = P.group; cells[addDays(P.start, ci)] = { code, raw: c.raw, fill: c.fill }; });
+    add(`${P.id}:${ri}`, row.name, P.group, cells).files.add(P.file);
+  });
+  R.extra.forEach((id) => add(`x:${id}`, '', '', {}));
+  for (const m of order) for (const [d, code] of Object.entries(R.cellEdits[m.key] || {})) m.cells[d] = { code, raw: '', fill: '' };
+  let min = null, max = null;
+  for (const P of R.parts) { const e = addDays(P.start, P.ncols - 1); if (!min || P.start < min) min = P.start; if (!max || e > max) max = e; }
+  const dates = []; if (min) for (let d = min; d <= max && dates.length < 62; d = addDays(d, 1)) dates.push(d);
+  return { rows: order, dates };
+}
+
 function viewReview() {
-  const R = ui.review;
-  const days = Array.from({ length: R.cols.length }, (_, i) => addDays(R.start, i));
-  const head = days.map((d) => { const dt = parseIso(d); return `<th>${pad(dt.getDate())}<small>${pad(dt.getMonth() + 1)}.${dt.getFullYear() % 100}</small></th>`; }).join('');
-  const rows = R.rows.map((r, ri) => `<tr class="${r.skip ? 'skip' : ''}">
-    <td><input type="checkbox" data-act="rv-skip" data-r="${ri}" ${r.skip ? '' : 'checked'} aria-label="Bu satırı al"></td>
-    <td class="name"><input type="text" id="rv-name-${ri}" data-act="rv-name" data-r="${ri}" value="${esc(r.name)}" aria-label="Ad soyad"></td>
-    ${r.cells.map((c, ci) => `<td><button class="code k-${CODES[c.code] ? c.code : 'Q'}" data-act="rv-cell" data-r="${ri}" data-c="${ci}" title="${c.raw ? 'Okunan: ' + esc(c.raw) : ''}${c.fill && c.fill !== 'white' ? ' Renk: ' + (COLOR_NAMES[c.fill] || c.fill) : ''}">${CODES[c.code] ? CODES[c.code].short : '?'}</button></td>`).join('')}</tr>`).join('');
-  const warn = R.warnings.map((w) => `<div class="note">${esc(w)}</div>`).join('');
-  return `<div class="card stack">
-    <div class="row"><div style="flex:1;min-width:0"><div class="eyebrow">Kontrol et ve düzelt</div><h2 style="font-size:24px">${esc(R.file)}</h2></div>
-      <button class="btn" data-act="rv-cancel">Vazgeç</button><button class="btn primary" data-act="rv-save">${ICON_CHECK}Kaydet</button></div>
-    ${warn}
-    <div class="review-top">
-      <div class="preview"><canvas id="rv-canvas"></canvas></div>
-      <div class="stack">
-        <div class="settings-grid">
-          <label class="field">Bu liste hangi vardiya?
-            <select id="rv-group">${[['1', '1. Vardiya'], ['2', '2. Vardiya'], ['3', '3. Vardiya'], ['', 'Karışık (hücrelerde 1/2/3 yazıyor)']].map(([v, l]) => `<option value="${v}" ${R.group === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-          <label class="field">İlk sütunun tarihi<input type="date" id="rv-start" value="${R.start}"></label>
+  const R = ui.review; const M = mergedReview();
+  const head = M.dates.map((d) => { const dt = parseIso(d); return `<th>${pad(dt.getDate())}<small>${pad(dt.getMonth() + 1)}.${dt.getFullYear() % 100}</small></th>`; }).join('');
+  const rows = M.rows.map((m) => { const skip = !!R.skip[m.key]; return `<tr class="${skip ? 'skip' : ''}">
+    <td><input type="checkbox" data-act="rv-skip" data-key="${esc(m.key)}" ${skip ? '' : 'checked'} aria-label="Bu kişiyi al"></td>
+    <td class="name rv"><div class="rvn"><input type="text" data-act="rv-name" data-key="${esc(m.key)}" value="${esc(m.name)}" placeholder="Ad soyad yazın" aria-label="Ad soyad">${[...m.groups].map((g) => `<span class="gtag k-${g}">${g}</span>`).join('')}${m.files.size > 1 ? `<span class="small muted nowrap">${m.files.size} görsel</span>` : ''}</div></td>
+    ${M.dates.map((d) => { const c = m.cells[d] || { code: '' }; const k = CODES[c.code] ? c.code : 'Q'; return `<td><button class="code k-${k}" data-act="rv-cell" data-key="${esc(m.key)}" data-date="${d}" title="${c.raw ? 'Okunan: ' + esc(c.raw) : ''}${c.fill && c.fill !== 'white' && c.fill !== 'gray' ? ' Renk: ' + (COLOR_NAMES[c.fill] || c.fill) : ''}">${CODES[c.code] ? CODES[c.code].short : '?'}</button></td>`; }).join('')}</tr>`; }).join('');
+  const people = M.rows.filter((m) => !R.skip[m.key] && m.name).length;
+  const warn = R.parts.flatMap((P) => P.warnings.map((w) => `<div class="note"><b>${esc(P.file)}:</b> ${esc(w)}</div>`)).join('');
+  const parts = R.parts.map((P) => `<div class="part">
+      <canvas id="rv-cv-${P.id}" class="thumb"></canvas>
+      <div class="stack" style="gap:8px;min-width:0">
+        <div class="row" style="flex-wrap:nowrap"><b class="fname">${esc(P.file)}</b><span style="flex:1"></span><button class="iconbtn" data-act="rv-remove" data-id="${P.id}" aria-label="${esc(P.file)} görselini çıkar">${ICON_TRASH}</button></div>
+        <span class="small muted">${P.rows.length} satır · ${fmtShort(P.start)} – ${fmtShort(addDays(P.start, P.ncols - 1))}</span>
+        <div class="settings-grid" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">
+          <label class="field">Vardiya<select class="rv-group" data-id="${P.id}">${[['1', '1. Vardiya'], ['2', '2. Vardiya'], ['3', '3. Vardiya'], ['', 'Karışık']].map(([v, l]) => `<option value="${v}" ${P.group === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+          <label class="field">İlk sütun tarihi<input type="date" class="rv-start" data-id="${P.id}" value="${P.start}"></label>
         </div>
-        <p class="small muted" style="margin:0">${R.rows.filter((r) => !r.skip).length} kişi, ${R.cols.length} gün bulundu. Hücreye dokunarak değiştirin. Yazısız beyaz hücreler seçilen vardiya sayılır. “?” işaretli hücreler okunamadı.</p>
-        <div class="row"><button class="btn" data-act="rv-add-row">${ICON_PLUS}Satır ekle</button><button class="btn" data-act="rv-fill">Boşları ${R.group ? R.group + '. vardiya' : 'vardiya'} yap</button></div>
       </div>
+    </div>`).join('');
+  return `<div class="card stack">
+    <div class="row"><div style="flex:1;min-width:0"><div class="eyebrow">Kontrol et ve düzelt</div><h2 style="font-size:24px">${R.parts.length} görsel · ${people} kişi</h2></div>
+      <button class="btn" data-act="rv-cancel">Vazgeç</button><button class="btn primary" data-act="rv-save">${ICON_CHECK}Hepsini kaydet</button></div>
+    <p class="small muted" style="margin:0">Tüm görsellerdeki isimler tek listede toplandı. Aynı isim birden fazla görselde varsa tek satırda birleşir. Hücreye dokunarak değiştirin; “?” okunamayan hücredir.</p>
+    ${warn}
+    <div class="parts">${parts}
+      <label class="part addpart" for="file-in">${ICON_PLUS}<span>Görsel ekle</span></label>
+      <input type="file" id="file-in" accept="image/*" multiple hidden>
     </div>
+    <div class="row"><button class="btn" data-act="rv-add-row">${ICON_PLUS}Kişi ekle</button></div>
   </div>
   <div class="tablewrap"><table class="grid"><thead><tr><th></th><th class="name">Ad Soyad</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -489,8 +530,8 @@ function bindView() {
   $app.querySelectorAll('[data-act]').forEach((el) => {
     const act = el.dataset.act;
     if (el.tagName === 'INPUT') {
-      if (act === 'rv-name') el.addEventListener('input', () => { ui.review.rows[+el.dataset.r].name = el.value; });
-      if (act === 'rv-skip') el.addEventListener('change', () => { ui.review.rows[+el.dataset.r].skip = !el.checked; el.closest('tr').classList.toggle('skip', !el.checked); });
+      if (act === 'rv-name') el.addEventListener('change', () => renameReviewRow(el.dataset.key, el.value));
+      if (act === 'rv-skip') el.addEventListener('change', () => { ui.review.skip[el.dataset.key] = !el.checked; el.closest('tr').classList.toggle('skip', !el.checked); });
       return;
     }
     el.addEventListener('click', (e) => { e.preventDefault(); actions[act] && actions[act](el); });
@@ -505,11 +546,11 @@ function bindView() {
     drop.addEventListener('dragleave', () => drop.classList.remove('over'));
     drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); const f = [...e.dataTransfer.files].filter((x) => x.type.startsWith('image/')); if (f.length) handleFiles(f); });
   }
-  if (ui.view === 'yukle' && ui.review) {
-    const cv = document.getElementById('rv-canvas'); const src = ui.review.preview;
-    cv.width = src.width; cv.height = src.height; cv.getContext('2d').drawImage(src, 0, 0);
-    document.getElementById('rv-group').addEventListener('change', (e) => { ui.review.group = e.target.value; render(); });
-    document.getElementById('rv-start').addEventListener('change', (e) => { if (e.target.value) { ui.review.start = e.target.value; render(); } });
+  if (ui.view === 'yukle' && ui.review && !ui.busy) {
+    for (const P of ui.review.parts) { const cv = document.getElementById('rv-cv-' + P.id); cv.width = P.preview.width; cv.height = P.preview.height; cv.getContext('2d').drawImage(P.preview, 0, 0); }
+    const part = (el) => ui.review.parts.find((P) => P.id === el.dataset.id);
+    $app.querySelectorAll('.rv-group').forEach((el) => el.addEventListener('change', () => { part(el).group = el.value; render(); }));
+    $app.querySelectorAll('.rv-start').forEach((el) => el.addEventListener('change', () => { if (el.value) { part(el).start = el.value; render(); } }));
   }
   if (ui.view === 'ayarlar') {
     const S = store.settings;
@@ -546,15 +587,15 @@ const actions = {
   'daily-areas': (el) => { ui.areaShift = el.dataset.g; ui.areaShown = true; ui.areaMode = 'liste'; go('alanlar'); },
   'add-person': () => personSheet(null),
   'sample': async (el) => {
-    const n = el.dataset.n;
-    try { const blob = await (await fetch(`samples/vardiya-${n}.png`)).blob(); handleFiles([new File([blob], `vardiya-${n}.png`, { type: 'image/png' })]); }
+    const ns = el.dataset.n === 'all' ? ['1', '2', '3'] : [el.dataset.n];
+    try { handleFiles(await Promise.all(ns.map(async (n) => new File([await (await fetch(`samples/vardiya-${n}.png`)).blob()], `vardiya-${n}.png`, { type: 'image/png' })))); }
     catch (e) { toast('Örnek görsel açılamadı'); }
   },
-  'rv-cell': (el) => { const r = +el.dataset.r, c = +el.dataset.c; const cell = ui.review.rows[r].cells[c];
-    pickCode(cell.code, `${ui.review.rows[r].name || 'Satır ' + (r + 1)} · ${fmtShort(addDays(ui.review.start, c))}${cell.raw ? ' · okunan: “' + cell.raw + '”' : ''}`, (code) => { cell.code = code; render(); }); },
-  'rv-add-row': () => { ui.review.rows.push({ name: '', skip: false, cells: ui.review.cols.map(() => ({ code: ui.review.group || '', raw: '' })) }); render(); },
-  'rv-fill': () => { const g = ui.review.group; if (!g) { toast('Önce listenin vardiyasını seçin'); return; } ui.review.rows.forEach((r) => r.cells.forEach((c) => { if (!c.code || !CODES[c.code]) c.code = g; })); render(); },
-  'rv-cancel': () => { ui.review = null; nextQueued(); },
+  'rv-cell': (el) => { const key = el.dataset.key, d = el.dataset.date; const m = mergedReview().rows.find((x) => x.key === key); const c = (m && m.cells[d]) || { code: '' };
+    pickCode(c.code, `${(m && m.name) || 'İsimsiz'} · ${fmtShort(d)}${c.raw ? ' · okunan: “' + c.raw + '”' : ''}`, (code) => { (ui.review.cellEdits[key] = ui.review.cellEdits[key] || {})[d] = code; render(); }); },
+  'rv-add-row': () => { ui.review.extra.push(uid()); render(); const ins = $app.querySelectorAll('td.name input'); ins[ins.length - 1].focus(); },
+  'rv-remove': (el) => { ui.review.parts = ui.review.parts.filter((P) => P.id !== el.dataset.id); if (!ui.review.parts.length) ui.review = null; render(); },
+  'rv-cancel': () => { ui.review = null; queue = []; render(); },
   'rv-save': () => saveReview(),
   'backup': async () => { const txt = JSON.stringify(store); try { await navigator.clipboard.writeText(txt); toast('Yedek panoya kopyalandı'); } catch (e) { showText('Yedek', 'Aşağıdaki metnin tamamını seçip kopyalayın:', txt); } },
   'restore-open': () => restoreSheet(),
@@ -640,52 +681,79 @@ function toast(msg) {
 }
 
 // ---------- Kaydetme ----------
+function renameReviewRow(key, value) {
+  const R = ui.review; const m = mergedReview().rows.find((x) => x.key === key); if (!m) return;
+  const name = value.trim().replace(/\s+/g, ' ');
+  m.srcs.forEach((src) => { R.names[src] = name; });
+  const nk = name ? nameKey(name) : '?' + m.srcs[0];
+  if (nk !== key) {
+    if (R.cellEdits[key]) { R.cellEdits[nk] = { ...(R.cellEdits[nk] || {}), ...R.cellEdits[key] }; delete R.cellEdits[key]; }
+    if (R.skip[key]) { R.skip[nk] = true; delete R.skip[key]; }
+  }
+  render();
+}
+
 function saveReview() {
-  const R = ui.review;
-  const rows = R.rows.filter((r) => !r.skip && r.name.trim());
+  const R = ui.review; const M = mergedReview();
+  const rows = M.rows.filter((m) => !R.skip[m.key] && m.name);
   if (!rows.length) { toast('Kaydedilecek kişi yok'); return; }
-  if (store.demo) { store.people = {}; store.uploads = []; store.demo = false; }
-  for (const r of rows) {
-    const name = r.name.trim().replace(/\s+/g, ' '); const k = nameKey(name);
-    const p = store.people[k] || { name, group: R.group, days: {} };
-    p.name = name; if (R.group) p.group = R.group;
-    r.cells.forEach((c, i) => { const d = addDays(R.start, i); let code = CODES[c.code] ? c.code : ''; if (!code && R.group && !c.raw) code = R.group; if (code) p.days[d] = code; else delete p.days[d]; });
-    if (!R.group) { // karışık listede ekip = en çok çalışılan vardiya
+  if (store.demo) { store.people = {}; store.uploads = []; store.dayAreas = {}; store.demo = false; }
+  for (const m of rows) {
+    const k = nameKey(m.name);
+    const p = store.people[k] || { name: m.name, group: '', days: {} };
+    p.name = m.name;
+    for (const [d, c] of Object.entries(m.cells)) { if (CODES[c.code] && c.code) p.days[d] = c.code; else if (c.code === '') delete p.days[d]; }
+    if (m.groups.size === 1) p.group = [...m.groups][0];
+    else { // karışık listede ekip = en çok çalışılan vardiya
       const cnt = { '1': 0, '2': 0, '3': 0 }; Object.values(p.days).forEach((c) => { if (cnt[c] != null) cnt[c]++; });
       const best = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0]; if (best[1]) p.group = best[0];
     }
     store.people[k] = p;
   }
-  store.uploads.push({ id: uid(), at: new Date().toISOString(), group: R.group, start: R.start, days: R.cols.length, count: rows.length, file: R.file });
+  for (const P of R.parts) store.uploads.push({ id: uid(), at: new Date().toISOString(), group: P.group, start: P.start, days: P.ncols, count: P.rows.length, file: P.file });
   save();
-  ui.date = (todayIso() >= R.start && todayIso() <= addDays(R.start, R.cols.length - 1)) ? todayIso() : R.start;
+  const t = todayIso();
+  ui.date = M.dates.includes(t) ? t : M.dates[0] || t;
   ui.gridStart = null; ui.review = null;
   toast(`${rows.length} kişi kaydedildi`);
-  if (!nextQueued()) go('gunluk');
+  go('gunluk');
 }
 
 // ---------- Görsel analizi ----------
 let queue = [];
-async function handleFiles(files) { queue.push(...files); if (!ui.busy && !ui.review) nextQueued(); }
-function nextQueued() {
-  const f = queue.shift();
-  if (!f) { render(); return false; }
-  analyzeFile(f); return true;
+let batch = { done: 0, total: 0 };
+function handleFiles(files) {
+  if (!files.length) return;
+  queue.push(...files); batch.total += files.length;
+  if (!ui.busy) nextQueued();
 }
-function setBusy(text, pct) { ui.busy = { text, pct }; if (ui.view !== 'yukle') go('yukle'); else render(); }
+async function nextQueued() {
+  const f = queue.shift();
+  if (!f) { ui.busy = null; batch = { done: 0, total: 0 }; render(); return; }
+  await analyzeFile(f); batch.done++;
+  nextQueued();
+}
+function setBusy(text, pct) {
+  const n = batch.total || 1, i = Math.min(batch.done, n - 1);
+  ui.busy = { text: `Görsel ${i + 1}/${n}: ${text}`, pct: (i + pct) / n };
+  if (ui.view !== 'yukle') go('yukle'); else render();
+}
 
 async function analyzeFile(file) {
-  setBusy('Görsel açılıyor', 0.02);
+  setBusy('açılıyor', 0.02);
   try {
     const img = await loadImg(file);
     const res = await analyzeImage(img, (t, p) => setBusy(t, p));
-    res.file = file.name || 'Liste';
-    ui.review = res;
+    if (!ui.review) ui.review = { parts: [], names: {}, cellEdits: {}, skip: {}, extra: [] };
+    const prev = ui.review.parts[ui.review.parts.length - 1];
+    // aynı listenin devamı olan (başlıksız) görsel: tarihi ve vardiyayı öncekinden al
+    if (prev && !res.dateFound) { res.start = prev.start; res.warnings = res.warnings.filter((w) => !/tarih/i.test(w)); res.warnings.push('Tarih bulunamadı; önceki görselin tarihleri kullanıldı.'); }
+    if (prev && !res.groupFound) res.group = prev.group;
+    ui.review.parts.push({ id: uid(), file: file.name || 'Liste', start: res.start, group: res.group, ncols: res.cols.length, preview: res.preview, rows: res.rows, warnings: res.warnings });
   } catch (e) {
     console.error(e);
-    toast('Görsel okunamadı: ' + (e.message || e));
+    toast(`${file.name || 'Görsel'} okunamadı: ${e.message || e}`);
   }
-  ui.busy = null; render();
 }
 
 function loadImg(file) {
@@ -956,7 +1024,7 @@ async function analyzeImage(img, progress) {
   }
 
   // 7) Vardiya ve başlangıç tarihi tahmini
-  let group = '';
+  let group = ''; let groupDefault = false;
   const tm = title.match(/([123])\s*[.\-]?\s*V[A-ZİI]{1,3}[İI]YA/i); if (tm) group = tm[1];
   const dates = [...title.matchAll(/(\d{1,2})\s*[./-]+\s*(\d{1,2})\s*[./-]+\s*(\d{4}|\d{2})/g)]
     .map((m) => { const y = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return new Date(y, +m[2] - 1, +m[1]); })
@@ -978,6 +1046,7 @@ async function analyzeImage(img, progress) {
     for (let m = -2; m <= 2; m++) { const d = new Date(ref.getFullYear(), ref.getMonth() + m, s0); const diff = Math.abs(d - ref); if (diff < bestDiff) { bestDiff = diff; bestD = d; } }
     start = iso(bestD);
   } else if (dates.length) start = iso(dates[0]);
+  const dateFound = !!start;
   if (!start) { start = todayIso(); warnings.push('Liste tarihleri okunamadı. “İlk sütunun tarihi” alanını kontrol edin.'); }
 
   // Sondaki toplam/özet sütunlarını at (çoğunluğu 4+ veya çok basamaklı sayı)
@@ -1008,12 +1077,11 @@ async function analyzeImage(img, progress) {
     if (empty) continue;
     rows.push({ name: nm, skip: !nm && !!worker, cells });
   }
-  if (!group) { const best = Object.entries(digitCount).sort((a, b) => b[1] - a[1])[0]; const nonzero = Object.values(digitCount).filter((n) => n > 0).length; if (best[1] && nonzero === 1) group = best[0]; else if (!best[1]) group = '1'; }
+  if (!group) { const best = Object.entries(digitCount).sort((a, b) => b[1] - a[1])[0]; const nonzero = Object.values(digitCount).filter((n) => n > 0).length; if (best[1] && nonzero === 1) group = best[0]; else if (!best[1]) { group = '1'; groupDefault = true; } }
   // Yazısız beyaz hücreler = listenin vardiyası (kaydederken de uygulanır)
-  if (group) rows.forEach((r) => r.cells.forEach((c) => { if (!c.code) c.code = group; }));
   if (!rows.length) warnings.push('Hiç kişi satırı bulunamadı. “Satır ekle” ile elle ekleyebilirsiniz.');
   progress('Bitti', 1);
-  return { start, group, cols: dayCols, rows, warnings, preview };
+  return { start, group, cols: dayCols, rows, warnings, preview, dateFound, groupFound: !groupDefault };
 }
 
 // ---------- İkonlar ----------

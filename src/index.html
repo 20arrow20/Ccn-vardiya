@@ -225,6 +225,17 @@ button.pchip:hover { border-color: var(--accent); }
 .aedit input[type=text] { width: 100%; }
 .aedit input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
 @media (max-width: 720px) { .tab { font-size: 11px; padding: 6px 2px; } }
+/* Çoklu görsel */
+.parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.part { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--surface-2); align-items: start; }
+.part .thumb { width: 96px; height: auto; border-radius: 6px; border: 1px solid var(--line); background: #fff; }
+.part .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.addpart { grid-template-columns: 1fr; place-items: center; align-content: center; gap: 6px; min-height: 120px; border-style: dashed; color: var(--accent); font-weight: 600; cursor: pointer; }
+.addpart svg { width: 28px; height: 28px; }
+table.grid td.name.rv { max-width: none; overflow: visible; }
+.rvn { display: flex; align-items: center; gap: 4px; }
+.rvn .gtag { margin-left: 0; }
+.nowrap { white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 

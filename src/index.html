@@ -225,6 +225,16 @@ button.pchip:hover { border-color: var(--accent); }
 .aedit input[type=text] { width: 100%; }
 .aedit input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
 @media (max-width: 720px) { .tab { font-size: 11px; padding: 6px 2px; } }
+/* Toplamlar */
+.shift-head .tot { font-size: 12px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.shift-head .tot b { color: var(--fg); font-weight: 700; }
+.totbar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.totbar > div { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--surface-2); }
+.totbar b { display: block; font-family: var(--font-display); font-size: 26px; line-height: 1; font-variant-numeric: tabular-nums; }
+.totbar span { font-size: 12px; color: var(--muted); }
+table.grid tfoot th, table.grid tfoot td { background: var(--surface-2); font-size: 12px; font-weight: 600; border-top: 1px solid var(--line); }
+table.grid tfoot tr:first-child th, table.grid tfoot tr:first-child td { border-top: 2px solid var(--line); }
+table.grid td.cnt { color: var(--k); font-variant-numeric: tabular-nums; }
 /* Çoklu görsel */
 .parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
 .part { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--surface-2); align-items: start; }

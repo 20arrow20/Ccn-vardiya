@@ -233,7 +233,8 @@ function viewDaily() {
       </div>`;
     };
     return `<section class="shift" data-s="${g}">
-      <div class="shift-head"><div class="shift-num">${g}</div><div class="grow"><h3>${g}. Vardiya</h3><div class="hrs">${esc(store.settings.hours[g] || '')}</div></div>
+      <div class="shift-head"><div class="shift-num">${g}</div><div class="grow"><h3>${g}. Vardiya</h3><div class="hrs">${esc(store.settings.hours[g] || '')}</div>
+        <div class="tot"><b>${L.working.length}</b> çalışan · <b>${L.absent.OFF.length}</b> OFF · <b>${L.absent.R.length + L.absent.YI.length + L.absent.MI.length}</b> rapor/izin</div></div>
         <button class="iconbtn" title="${g}. vardiya alan listesi" aria-label="${g}. vardiya alan listesi" data-act="daily-areas" data-g="${g}">${ICON_LIST}</button>
         <button class="iconbtn" title="${g}. vardiyayı paylaş" aria-label="${g}. vardiyayı paylaş" data-act="share" data-g="${g}">${ICON_SHARE}</button></div>
       ${grp(g, 'Çalışanlar', L.working, true)}
@@ -277,7 +278,9 @@ function shareText(date, which) {
     return lines.join('\n');
   };
   const groups = which === 'all' ? ['1', '2', '3'] : [which];
-  return [head, ...groups.map(block)].join('\n\n');
+  const tot = groups.reduce((n, g) => n + lists[g].working.length, 0);
+  const totLine = which === 'all' ? `Toplam çalışan: ${tot} (${groups.map((g) => `${g}. vardiya ${lists[g].working.length}`).join(', ')})` : `Toplam çalışan: ${tot}`;
+  return [head + '\n' + totLine, ...groups.map(block)].join('\n\n');
 }
 
 // ---------- Alan listesi (görev dağılımı) ----------
@@ -305,11 +308,14 @@ function areaList(date, g) {
 }
 function areaShareText(date, g) {
   const A = areaList(date, g); const h = store.settings.hours[g];
-  const lines = [`${store.settings.company ? store.settings.company + ' · ' : ''}${fmtShort(date)}`, `*${g}. VARDİYA*${h ? ` (${h})` : ''}`, ''];
-  for (const a of A.valid) lines.push(`*${a.name}:* ${A.byArea[a.id].map((p) => p.name).join(', ') || '-'}`);
-  if (A.unassigned.length) lines.push(`*Atanmamış:* ${A.unassigned.map((p) => p.name).join(', ')}`);
+  const total = A.unassigned.length + A.valid.reduce((n, a) => n + A.byArea[a.id].length, 0);
+  const off = A.absent.OFF.length, izin = A.absent.R.length + A.absent.YI.length + A.absent.MI.length;
+  const lines = [`${store.settings.company ? store.settings.company + ' · ' : ''}${fmtShort(date)}`, `*${g}. VARDİYA*${h ? ` (${h})` : ''}`,
+    `Toplam çalışan: ${total} · OFF: ${off} · Rapor/İzin: ${izin}`, ''];
+  for (const a of A.valid) lines.push(`*${a.name} (${A.byArea[a.id].length}):* ${A.byArea[a.id].map((p) => p.name).join(', ') || '-'}`);
+  if (A.unassigned.length) lines.push(`*Atanmamış (${A.unassigned.length}):* ${A.unassigned.map((p) => p.name).join(', ')}`);
   const abs = ABSENT.filter((x) => A.absent[x.code].length);
-  if (abs.length) { lines.push(''); abs.forEach((x) => lines.push(`${x.title}: ${A.absent[x.code].map((p) => p.name).join(', ')}`)); }
+  if (abs.length) { lines.push(''); abs.forEach((x) => lines.push(`${x.title} (${A.absent[x.code].length}): ${A.absent[x.code].map((p) => p.name).join(', ')}`)); }
   return lines.join('\n');
 }
 const shiftsLabel = (a) => a.shifts.length === 3 ? 'Tüm vardiyalar' : a.shifts.map((g) => g + '.').join(' ') + ' vardiya';
@@ -336,6 +342,7 @@ function viewAreas() {
     result = `<section class="card stack arealist">
       <div class="row"><div style="flex:1;min-width:0"><div class="eyebrow">${fmtShort(d)} · ${total} çalışan</div><h2 style="font-size:24px">${g}. Vardiya alan listesi</h2></div>
         <button class="btn" data-act="area-copy">Kopyala</button><button class="btn primary" data-act="area-share">${ICON_SHARE}Paylaş</button></div>
+      <div class="totbar"><div><b>${total}</b><span>Çalışan</span></div><div><b style="color:var(--off)">${A.absent.OFF.length}</b><span>OFF</span></div><div><b>${A.absent.R.length}</b><span>Raporlu</span></div><div><b>${A.absent.YI.length + A.absent.MI.length}</b><span>İzinli</span></div></div>
       <div class="areas">${A.valid.map((a) => `<div class="arow ${A.byArea[a.id].length ? '' : 'none'}"><div class="aname">${esc(a.name)}<span>${A.byArea[a.id].length}</span></div><div class="pchips">${A.byArea[a.id].map(chip).join('') || '<span class="empty">Kimse yok</span>'}</div></div>`).join('')}
         ${A.unassigned.length ? `<div class="arow warn"><div class="aname">Atanmamış<span>${A.unassigned.length}</span></div><div class="pchips">${A.unassigned.map(chip).join('')}</div></div>` : ''}</div>
       <div class="absent">${ABSENT.filter((x) => A.absent[x.code].length).map((x) => `<div><span class="dot k-${x.code}"></span><b>${x.title} (${A.absent[x.code].length}):</b> ${A.absent[x.code].map((p) => esc(p.name)).join(', ')}</div>`).join('') || '<span class="small muted">Bu vardiyada OFF, rapor veya izinli yok.</span>'}</div>
@@ -454,6 +461,9 @@ function viewGrid() {
   if (ui.gridGroup !== 'all') people = people.filter((p) => p.group === ui.gridGroup);
   const head = days.map((d) => { const dt = parseIso(d); const we = dt.getDay() === 0 || dt.getDay() === 6; return `<th class="${d === t ? 'today' : ''} ${we ? 'we' : ''}">${pad(dt.getDate())}<small>${pad(dt.getMonth() + 1)}.${dt.getFullYear() % 100}</small></th>`; }).join('');
   const rows = people.map((p) => `<tr><td class="name"><button data-act="person" data-key="${esc(p.key)}">${esc(p.name)}</button>${p.group ? `<span class="gtag k-${p.group}">${p.group}</span>` : ''}</td>${days.map((d) => { const c = p.days[d] || ''; return `<td><button class="code k-${c}" data-act="cell" data-key="${esc(p.key)}" data-date="${d}" aria-label="${esc(p.name)} ${fmtShort(d)}: ${CODES[c] ? CODES[c].label : c}">${CODES[c] ? CODES[c].short : '?'}</button></td>`; }).join('')}</tr>`).join('');
+  const foot = [['1', '1. vardiya çalışan'], ['2', '2. vardiya çalışan'], ['3', '3. vardiya çalışan'], ['OFF', 'OFF'], ['IZ', 'Rapor / izin']].map(([c, l]) => `<tr><th class="name">${l}</th>${days.map((d) => {
+    const n = people.filter((p) => (c === 'IZ' ? ['R', 'YI', 'MI'].includes(p.days[d]) : p.days[d] === c)).length;
+    return `<td class="cnt k-${c === 'IZ' ? 'R' : c}">${n || '·'}</td>`; }).join('')}</tr>`).join('');
   const filt = [['all', 'Tümü'], ['1', '1. Vardiya'], ['2', '2. Vardiya'], ['3', '3. Vardiya']].map(([v, l]) => `<button class="chip" data-act="grid-group" data-g="${v}" aria-pressed="${ui.gridGroup === v}">${l}</button>`).join('');
   return `<div class="card stack">
     <div class="datebar">
@@ -464,7 +474,7 @@ function viewGrid() {
     <div class="row"><div class="chips">${filt}</div><span style="flex:1"></span><button class="btn" data-act="add-person">${ICON_PLUS}Kişi ekle</button></div>
     <div class="legend">${CODE_ORDER.filter((c) => c).map((c) => `<span><span class="dot k-${c}"></span>${CODES[c].short} = ${CODES[c].label}</span>`).join('')}</div>
   </div>
-  <div class="tablewrap"><table class="grid"><thead><tr><th class="name">Ad Soyad</th>${head}</tr></thead><tbody>${rows || `<tr><td class="name">Kimse yok</td></tr>`}</tbody></table></div>`;
+  <div class="tablewrap"><table class="grid"><thead><tr><th class="name">Ad Soyad</th>${head}</tr></thead><tbody>${rows || `<tr><td class="name">Kimse yok</td></tr>`}</tbody><tfoot>${foot}</tfoot></table></div>`;
 }
 
 // ---------- Yükleme / inceleme ----------
@@ -530,6 +540,7 @@ function viewReview() {
       <div class="stack" style="gap:8px;min-width:0">
         <div class="row" style="flex-wrap:nowrap"><b class="fname">${esc(P.file)}</b><span style="flex:1"></span><button class="iconbtn" data-act="rv-remove" data-id="${P.id}" aria-label="${esc(P.file)} görselini çıkar">${ICON_TRASH}</button></div>
         <span class="small muted">${P.rows.length} satır · ${fmtShort(P.start)} – ${fmtShort(addDays(P.start, P.ncols - 1))}</span>
+        ${P.group ? '' : '<span class="small" style="color:var(--off)">Bu tablonun vardiyasını seçin; seçilmezse yazısız hücreler çalışma sayılmaz.</span>'}
         <div class="settings-grid" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">
           <label class="field">Vardiya<select class="rv-group" data-id="${P.id}">${[['1', '1. Vardiya'], ['2', '2. Vardiya'], ['3', '3. Vardiya'], ['', 'Karışık']].map(([v, l]) => `<option value="${v}" ${P.group === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
           <label class="field">İlk sütun tarihi<input type="date" class="rv-start" data-id="${P.id}" value="${P.start}"></label>
@@ -795,13 +806,24 @@ async function analyzeFile(file) {
   setBusy('açılıyor', 0.02);
   try {
     const img = await loadImg(file);
-    const res = await analyzeImage(img, (t, p) => setBusy(t, p));
+    const results = await analyzeImage(img, (t, p) => setBusy(t, p));
     if (!ui.review) ui.review = { parts: [], names: {}, cellEdits: {}, skip: {}, extra: [] };
-    const prev = ui.review.parts[ui.review.parts.length - 1];
-    // aynı listenin devamı olan (başlıksız) görsel: tarihi ve vardiyayı öncekinden al
-    if (prev && !res.dateFound) { res.start = prev.start; res.warnings = res.warnings.filter((w) => !/tarih/i.test(w)); res.warnings.push('Tarih bulunamadı; önceki görselin tarihleri kullanıldı.'); }
-    if (prev && !res.groupFound) res.group = prev.group;
-    ui.review.parts.push({ id: uid(), file: file.name || 'Liste', start: res.start, group: res.group, ncols: res.cols.length, preview: res.preview, rows: res.rows, warnings: res.warnings });
+    for (const res of results) {
+      const prev = ui.review.parts[ui.review.parts.length - 1];
+      if (!res.groupFound) {
+        // devam tablosu: önce kayıtlı kişilerin ekibine bak, yoksa önceki tabloyu al
+        const cnt = {}; res.rows.forEach((r) => { const p = store.people[nameKey(r.name)]; if (p && p.group) cnt[p.group] = (cnt[p.group] || 0) + 1; });
+        const best = Object.entries(cnt).sort((x, y) => y[1] - x[1])[0];
+        if (best && best[1] >= Math.max(2, res.rows.length * 0.5)) { res.group = best[0]; res.warnings.push(`Vardiya başlıkta yok; kayıtlı isimlere göre ${best[0]}. vardiya seçildi.`); }
+        else if (prev) { res.group = prev.group; res.warnings.push(`Vardiya başlıkta yok; önceki tablodaki gibi ${prev.group ? prev.group + '. vardiya' : 'karışık'} seçildi.`); }
+      }
+      if (!res.dateFound) {
+        const last = prev || store.uploads[store.uploads.length - 1];
+        if (last) { res.start = last.start; res.warnings = res.warnings.filter((w) => !/tarih/i.test(w)); res.warnings.push(`Tarih bulunamadı; ${prev ? 'önceki tablonun' : 'son yüklenen listenin'} tarihleri kullanıldı.`); }
+      }
+      const name = (file.name || 'Liste') + (results.length > 1 ? ` · tablo ${res.table}` : '');
+      ui.review.parts.push({ id: uid(), file: name, start: res.start, group: res.group, ncols: res.cols.length, preview: res.preview, rows: res.rows, warnings: res.warnings });
+    }
   } catch (e) {
     console.error(e);
     toast(`${file.name || 'Görsel'} okunamadı: ${e.message || e}`);
@@ -814,6 +836,19 @@ function loadImg(file) {
     im.onload = () => res(im); im.onerror = () => rej(new Error('Dosya bir görsel değil'));
     im.src = url;
   });
+}
+
+// Başlıktan vardiya: "1. VARDİYA", "I. VARDİYA", "SABAH", "08:00-16:00" …
+function shiftFromTitle(title) {
+  const T = String(title || '').toLocaleUpperCase('tr').replace(/\s+/g, ' ');
+  let m = T.match(/(?:^|[^0-9])([123])\s*[.\-]?\s*V[A-ZİI]{1,3}[İI]YA/); if (m) return m[1];
+  m = T.match(/(?:^|[^A-Z])(III|II|I)\s*[.\-]?\s*V[A-ZİI]{1,3}[İI]YA/); if (m) return String(m[1].length);
+  m = T.match(/V[A-ZİI]{1,3}[İI]YA\s*[:\-]?\s*([123])(?![0-9])/); if (m) return m[1];
+  if (/SABAH/.test(T)) return '1'; if (/AKŞAM|AKSAM/.test(T)) return '2'; if (/GECE/.test(T)) return '3';
+  if (/(?:^|\D)0?8[.:]?(?:00)?\s*[-–]\s*16/.test(T)) return '1';
+  if (/(?:^|\D)16[.:]?(?:00)?\s*[-–]\s*(?:24|00)/.test(T)) return '2';
+  if (/(?:^|\D)(?:24|00)[.:]?(?:00)?\s*[-–]\s*0?8/.test(T)) return '3';
+  return '';
 }
 
 // Renk yardımcıları
@@ -981,9 +1016,102 @@ function parseCode(t) {
   return null; // okunamadı
 }
 
+// Bir görseldeki ayrı tabloları bul (alt alta / yan yana). Yatay çizgiler, aralarında en az iki dikey çizgiyle
+// bağlıysa aynı tablodur; bağlantı yoksa yeni tablo başlar.
+function findTables(img) {
+  const W0 = img.naturalWidth || img.width, H0 = img.naturalHeight || img.height;
+  const sc = Math.min(1, 1600 / W0); const w = Math.round(W0 * sc), h = Math.round(H0 * sc);
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d', { willReadFrequently: true }); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h);
+  const px = ctx.getImageData(0, 0, w, h).data; const n = w * h; const v = new Uint8Array(n);
+  for (let i = 0, p = 0; i < n; i++, p += 4) v[i] = Math.max(px[p], px[p + 1], px[p + 2]);
+  const hm = new Uint8Array(n), vm = new Uint8Array(n);
+  for (let i = 4 * w; i < n - 4 * w; i++) {
+    const c = v[i]; if (c < 170) { hm[i] = vm[i] = 1; continue; } if (c > 225) continue;
+    let a = 0, b = 0, l = 0, r = 0;
+    for (let k = 2; k <= 4; k++) { a = Math.max(a, v[i - k * w]); b = Math.max(b, v[i + k * w]); l = Math.max(l, v[i - k]); r = Math.max(r, v[i + k]); }
+    if (Math.min(a, b) - c >= 30) hm[i] = 1; if (Math.min(l, r) - c >= 18) vm[i] = 1;
+  }
+  // yatay çizgi bantları
+  const minLen = Math.max(120, w * 0.2); let active = []; const lines = [];
+  for (let y = 0; y < h; y++) {
+    const runs = []; let st = -1, gap = 0, last = -1;
+    for (let x = 0; x <= w; x++) {
+      const on = x < w && hm[y * w + x];
+      if (on) { if (st < 0) st = x; last = x; gap = 0; }
+      else if (st >= 0 && ++gap > 5) { if (last - st >= minLen) runs.push([st, last]); st = -1; gap = 0; }
+    }
+    const next = [];
+    for (const [x0, x1] of runs) {
+      const b = active.find((q) => Math.abs(q.x0 - x0) < 14 && Math.abs(q.x1 - x1) < 14);
+      if (b) { b.y1 = y; b.x0 = Math.min(b.x0, x0); b.x1 = Math.max(b.x1, x1); next.push(b); }
+      else { const nb = { y0: y, y1: y, x0, x1 }; lines.push(nb); next.push(nb); }
+    }
+    active = next;
+  }
+  const L = lines.filter((b) => b.y1 - b.y0 <= 12).sort((a, b) => a.y0 - b.y0);
+  const par = L.map((_, i) => i); const find = (i) => (par[i] === i ? i : (par[i] = find(par[i])));
+  const connected = (A, B) => {
+    const ox0 = Math.max(A.x0, B.x0), ox1 = Math.min(A.x1, B.x1); const y0 = A.y1 + 1, y1 = B.y0 - 1; const span = y1 - y0 + 1;
+    if (span < 3) return true;
+    let groups = 0, prev = -9;
+    for (let x = ox0; x <= ox1; x++) {
+      let c = 0; for (let y = y0; y <= y1; y++) if (vm[y * w + x] || vm[y * w + x - 1] || vm[y * w + x + 1]) c++;
+      if (c >= span * 0.7) { if (x - prev > 3) groups++; prev = x; }
+    }
+    return groups >= 2;
+  };
+  for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
+    const A = L[i], B = L[j]; const ov = Math.min(A.x1, B.x1) - Math.max(A.x0, B.x0);
+    const la = A.x1 - A.x0, lb = B.x1 - B.x0;
+    // farklı uzunluktaki parçalar (yazı, başlık) tablo çizgisi değildir: atla
+    if (ov < 0.8 * Math.min(la, lb) || Math.min(la, lb) < 0.7 * Math.max(la, lb)) continue;
+    if (connected(A, B)) par[find(j)] = find(i);
+    break; // yalnızca hemen alttaki örtüşen çizgiyle bağla
+  }
+  const sets = {}; L.forEach((b, i) => { (sets[find(i)] = sets[find(i)] || []).push(b); });
+  let regs = Object.values(sets).map((g) => {
+    const ys = g.map((b) => b.y0).sort((a, b) => a - b); const gaps = ys.slice(1).map((y, i) => y - ys[i]).sort((a, b) => a - b);
+    return { x0: Math.min(...g.map((b) => b.x0)), x1: Math.max(...g.map((b) => b.x1)), y0: Math.min(...g.map((b) => b.y0)), y1: Math.max(...g.map((b) => b.y1)), n: g.length, rowH: gaps[Math.floor(gaps.length / 2)] || 0 };
+  }).sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+  // aynı genişlikte ve arası bir satırdan az olan parçalar aynı tablodur (soluk çizgi yüzünden bölünmüş)
+  for (let i = 0; i < regs.length; i++) for (let j = i + 1; j < regs.length; j++) {
+    const A = regs[i], B = regs[j]; const rh = Math.max(A.rowH, B.rowH, 20);
+    if (Math.abs(A.x0 - B.x0) < w * 0.02 && Math.abs(A.x1 - B.x1) < w * 0.02 && B.y0 - A.y1 >= -2 && B.y0 - A.y1 < rh * 0.8) {
+      regs[i] = { x0: Math.min(A.x0, B.x0), x1: Math.max(A.x1, B.x1), y0: A.y0, y1: Math.max(A.y1, B.y1), n: A.n + B.n, rowH: rh };
+      regs.splice(j, 1); j = i;
+    }
+  }
+  return regs.filter((r) => r.n >= 3 && r.x1 - r.x0 > w * 0.15)
+    .map((r) => ({ x0: r.x0 / sc, x1: r.x1 / sc, y0: r.y0 / sc, y1: r.y1 / sc }))
+    .sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+}
+
+// Görseldeki her tabloyu ayrı ayrı oku; sonuç dizisi döner
 async function analyzeImage(img, progress) {
+  let regions = [];
+  try { regions = findTables(img); } catch (e) { console.warn(e); }
+  if (regions.length <= 1) return [await analyzeTable(img, progress)];
+  const W0 = img.naturalWidth || img.width;
+  const out = [];
+  for (let k = 0; k < regions.length; k++) {
+    const r = regions[k];
+    // başlık için üstteki boşluğu da al (üstteki tablonun altına kadar)
+    const above = regions.filter((q, i) => i !== k && q.y1 <= r.y0 + 2 && q.x1 > r.x0 && q.x0 < r.x1).reduce((m, q) => Math.max(m, q.y1), 0);
+    const x0 = Math.max(0, Math.floor(r.x0 - 8)), x1 = Math.min(W0, Math.ceil(r.x1 + 8));
+    const y0 = Math.max(0, Math.floor(above + 2)), y1 = Math.ceil(r.y1 + 8);
+    const c = document.createElement('canvas'); c.width = x1 - x0; c.height = y1 - y0;
+    const cx = c.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, c.width, c.height); cx.drawImage(img, x0, y0, c.width, c.height, 0, 0, c.width, c.height);
+    try { const res = await analyzeTable(c, (t, p) => progress(`tablo ${k + 1}/${regions.length} · ${t}`, (k + p) / regions.length)); res.table = k + 1; out.push(res); }
+    catch (e) { console.warn('tablo', k + 1, e); }
+  }
+  if (!out.length) return [await analyzeTable(img, progress)];
+  return out;
+}
+
+async function analyzeTable(img, progress) {
   // 1) Görseli işlenebilir boyuta getir
-  const W0 = img.naturalWidth, H0 = img.naturalHeight;
+  const W0 = img.naturalWidth || img.width, H0 = img.naturalHeight || img.height;
   const scale = W0 < 1400 ? Math.min(2.5, 1400 / W0) : Math.min(1, 2400 / W0);
   const w = Math.round(W0 * scale), h = Math.round(H0 * scale);
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
@@ -1077,7 +1205,7 @@ async function analyzeImage(img, progress) {
 
   // 7) Vardiya ve başlangıç tarihi tahmini
   let group = ''; let groupDefault = false;
-  const tm = title.match(/([123])\s*[.\-]?\s*V[A-ZİI]{1,3}[İI]YA/i); if (tm) group = tm[1];
+  group = shiftFromTitle(title);
   const dates = [...title.matchAll(/(\d{1,2})\s*[./-]+\s*(\d{1,2})\s*[./-]+\s*(\d{4}|\d{2})/g)]
     .map((m) => { const y = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return new Date(y, +m[2] - 1, +m[1]); })
     .filter((d) => !isNaN(d) && d.getFullYear() > 2000)
@@ -1129,7 +1257,9 @@ async function analyzeImage(img, progress) {
     if (empty) continue;
     rows.push({ name: nm, skip: !nm && !!worker, cells });
   }
-  if (!group) { const best = Object.entries(digitCount).sort((a, b) => b[1] - a[1])[0]; const nonzero = Object.values(digitCount).filter((n) => n > 0).length; if (best[1] && nonzero === 1) group = best[0]; else if (!best[1]) { group = '1'; groupDefault = true; } }
+  if (!group) { const best = Object.entries(digitCount).sort((a, b) => b[1] - a[1])[0]; const nonzero = Object.values(digitCount).filter((n) => n > 0).length; const totalDigits = Object.values(digitCount).reduce((a, b) => a + b, 0);
+    // OCR birkaç rakamı yanlış okusa da baskın vardiya (%80+) tablonun vardiyasıdır
+    if (best[1] && (nonzero === 1 || best[1] >= totalDigits * 0.8)) group = best[0]; else if (!best[1]) { group = '1'; groupDefault = true; } }
   // Yazısız beyaz hücreler = listenin vardiyası (kaydederken de uygulanır)
   if (!rows.length) warnings.push('Hiç kişi satırı bulunamadı. “Satır ekle” ile elle ekleyebilirsiniz.');
   progress('Bitti', 1);

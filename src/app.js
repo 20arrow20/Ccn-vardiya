@@ -1046,6 +1046,59 @@ async function ocr(worker, canvas, params) {
   return data;
 }
 
+// ---------- Claude ile isim okuma ----------
+// Her satırın isim hücresi numaralanıp alt alta tek görsele dizilir; Claude numara -> isim döndürür.
+let samplerP = null;
+function getSampler() {
+  if (!window.claude || typeof window.claude.use !== 'function') return Promise.resolve(null);
+  if (!samplerP) samplerP = window.claude.use('sample').then(async (sm) => {
+    if (!sm) return null; const lim = await sm.limits().catch(() => null); return lim && lim.images ? { sm, max: lim.images.maxCount || 1 } : null;
+  }).catch(() => null);
+  return samplerP;
+}
+async function readNamesWithClaude(src, rowsB, [x0, x1], include, progress) {
+  const S = await getSampler(); if (!S) return null;
+  const idx = rowsB.map((_, r) => r).filter((r) => include[r]); if (!idx.length) return null;
+  // satır yüksekliği ~34 px, en fazla ~1.1 megapiksel görsel başına
+  const rh = 34, label = 44; const cw = x1 - x0;
+  const imgs = []; let chunk = [];
+  const flush = () => {
+    if (!chunk.length) return;
+    const width = Math.min(900, label + Math.round(cw * rh / Math.max(1, (rowsB[chunk[0]][1] - rowsB[chunk[0]][0])))) ;
+    const c = document.createElement('canvas'); c.width = width; c.height = chunk.length * (rh + 6) + 6;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.imageSmoothingQuality = 'high';
+    chunk.forEach((r, i) => {
+      const [y0, y1] = rowsB[r]; const y = 6 + i * (rh + 6);
+      g.fillStyle = '#000'; g.font = 'bold 18px sans-serif'; g.fillText(String(r + 1), 6, y + rh * 0.72);
+      g.drawImage(src, x0, y0, cw, y1 - y0, label, y, width - label - 4, rh);
+      g.strokeStyle = '#999'; g.strokeRect(label - 2, y - 1, width - label, rh + 2);
+    });
+    imgs.push(c); chunk = [];
+  };
+  for (const r of idx) { chunk.push(r); if ((chunk.length + 1) * 40 * 900 > 1100000) flush(); }
+  flush();
+  progress('İsimler Claude ile okunuyor', 0.5);
+  const out = rowsB.map(() => null);
+  try {
+    for (let i = 0; i < imgs.length; i += S.max) {
+      const part = imgs.slice(i, i + S.max);
+      const blobs = await Promise.all(part.map((c) => new Promise((res) => c.toBlob(res, 'image/png'))));
+      const res = await S.sm.json('These images show numbered rows cut from a Turkish hospital staff shift roster. '
+        + 'In each row, the number on the left is the row number and the box next to it is that row\'s NAME cell. '
+        + 'Read the person\'s full name in every row exactly as written, letter by letter, keeping Turkish letters (Ç Ğ I İ Ö Ş Ü) and the original upper/lower case. '
+        + 'Do not guess or correct spelling; copy what is written. If a row has no person name (empty, a column header such as "ADI SOYADI", a shift label, or a code like OFF), use an empty string. '
+        + 'Reply with only one JSON object mapping each row number (as a string) to the name, for example {"3":"AYŞE YILMAZ","4":""}.',
+        { images: blobs.length === 1 ? blobs[0] : blobs });
+      if (res && typeof res === 'object') for (const [k, v] of Object.entries(res)) { const r = parseInt(k, 10) - 1; if (r >= 0 && r < out.length && typeof v === 'string') out[r] = v.replace(/\s+/g, ' ').trim(); }
+    }
+  } catch (e) {
+    console.warn('Claude isim okuma', e && e.code);
+    if (e && ['not_granted', 'sampling_disabled', 'images_unavailable', 'capability_disabled', 'not_declared'].includes(e.code)) samplerP = Promise.resolve(null);
+    return out.some((x) => x != null) ? out : null;
+  }
+  return out;
+}
+
 // Bir satırın gün hücrelerini tek seferde oku; karakterleri x konumuna göre sütunlara dağıt.
 // (Tek karakterli hücreleri ayrı ayrı okumak güvenilmez; satır bağlamında çok daha iyi tanınıyor.)
 async function readStrip(worker, clean, y0, y1, cols, psm) {
@@ -1342,6 +1395,9 @@ async function analyzeTable(img, progress) {
       stats = all.map((row) => dayCols.map((ci) => row[ci]));
     }
     names.push(...best);
+    // claude.ai'de açıldıysa isimleri Claude okur (çok daha doğru); olmazsa cihazdaki okuma kalır
+    const ai = await readNamesWithClaude(cv, rowsB, colsB[nameCol], rowsB.map((_, r) => !(grayRow[r] || all[r][nameCol].gray)), progress);
+    if (ai) { ai.forEach((t, r) => { if (t != null) names[r] = t; }); best = names.slice(); if (ai.some((t) => t)) warnings.push('İsimler Claude ile okundu. Yine de yanlış bir isim görürseniz üzerine dokunup düzeltin; düzeltme hatırlanır.'); }
     if (score(best) < Math.max(1, (rowsB.length - 1) * 0.4)) warnings.push('Bu tablodaki isimler okunamadı; tablo düzeni farklı olabilir. İsim olmayan satırlar kaydedilmeyecek.');
     for (let r = 0; r < rowsB.length; r++) {
       progress(`Hücreler okunuyor (${r + 1}/${rowsB.length})`, 0.55 + 0.42 * (r / rowsB.length));

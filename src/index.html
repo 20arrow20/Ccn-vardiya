@@ -100,8 +100,10 @@ label.field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); fon
 .banner p { margin: 0; flex: 1 1 240px; }
 
 /* Günlük görünüm */
-.datebar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.datebar .dtitle { flex: 1 1 200px; min-width: 0; }
+.datebar { display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; }
+.datebar .iconbtn { flex: none; }
+.datebar .dtitle { flex: 1 1 auto; min-width: 0; }
+.datebar .dtitle h2 { overflow-wrap: anywhere; }
 .datebar .dtitle h2 { font-size: 26px; font-weight: 700; }
 .datebar .dtitle span { color: var(--muted); font-size: 14px; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }

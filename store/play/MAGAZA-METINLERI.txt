@@ -1,0 +1,51 @@
+VARDIYA PANOSU - GOOGLE PLAY MAGAZA METINLERI
+(Play Console > Buyume > Magaza varligi > Ana magaza girisi)
+
+UYGULAMA ADI (en fazla 30 karakter):
+Vardiya Panosu
+
+KISA ACIKLAMA (en fazla 80 karakter):
+Vardiya listesi görselinden günlük 1-2-3 vardiya, OFF ve izin listesi çıkarın.
+
+TAM ACIKLAMA (en fazla 4000 karakter):
+Vardiya Panosu, işyerinizin gönderdiği vardiya listesi görsellerini okuyup her gün için 1., 2. ve 3. vardiya listelerini hazırlar.
+
+Nasıl çalışır?
+• Vardiya listesi görsellerini (ekran görüntüsü ya da fotoğraf) birlikte seçin.
+• Uygulama tabloyu, tarihleri ve isimleri okur; kırmızı hücreleri OFF olarak tanır, R (rapor) ve Yİ (yıllık izin) yazılarını ayırır.
+• Kaydetmeden önce her şeyi kontrol edip yanlış hücreye dokunarak düzeltebilirsiniz.
+
+Günlük liste
+• Tarih ve vardiya seçin: o vardiyada çalışanlar, OFF olanlar, raporlular ve izinliler ayrı ayrı listelenir.
+• Her vardiya için toplam kişi, çalışan, OFF, raporlu ve izinli sayıları görünür.
+• OFF ve izin günleri, kişinin döndüğü vardiyaya yazılır.
+• Listeyi tek dokunuşla WhatsApp veya istediğiniz uygulamayla paylaşın.
+
+Kişi ara
+• İsim yazın; kişinin seçtiğiniz gündeki durumu ve tüm çalışma günleri tarihleriyle görünsün.
+
+Çizelge
+• 14 günlük tabloyu görün, rapor veya izin değişikliklerini hücreye dokunarak güncelleyin.
+
+Gizlilik
+• Tüm veriler yalnızca telefonunuzda saklanır. Görseller ve isimler hiçbir sunucuya gönderilmez.
+• Reklam, hesap açma veya izleme yoktur. İnternet bağlantısı gerekmez.
+
+UYGULAMA KATEGORISI: Verimlilik (Productivity)
+ETIKETLER: vardiya, nöbet, çalışma çizelgesi, personel
+E-POSTA: (Play hesabinizdaki gelistirici e-postasi)
+GIZLILIK POLITIKASI URL: https://claude.ai/artifact/GB3d6ZXRJ1XwoSHm3Mr7KF  (herkese acik yapin)
+
+GORSELLER (bu klasorde):
+• simge-512.png            -> Uygulama simgesi (512x512)
+• tanitim-1024x500.png     -> Ozellik grafigi (1024x500)
+• ekran-1..5 (1080x1920)   -> Telefon ekran goruntuleri (en az 2 tane yukleyin)
+Ekran goruntulerindeki isimler ornektir, gercek kisiler degildir.
+
+VERI GUVENLIGI FORMU (Uygulama icerigi > Veri guvenligi):
+• Uygulamaniz kullanici verilerini topluyor veya paylasiyor mu? -> Hayir
+  (Veriler yalnizca cihazda islenir ve saklanir; gelistiriciye veya ucuncu kisilere gonderilmez.)
+
+REKLAMLAR: Hayir
+HEDEF KITLE: 18 ve uzeri
+ICERIK DERECELENDIRME: Anketi "araclar / verimlilik" olarak doldurun; siddet, kumar vb. hepsine Hayir.

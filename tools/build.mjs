@@ -34,6 +34,9 @@ for (const [pkg, weights] of [['barlow', [400, 500, 600]], ['barlow-semi-condens
   }
 }
 writeFileSync(root + 'www/fonts/fonts.css', fontCss);
+// sürüm numarası Ayarlar'da görünür
+const version = JSON.parse(readFileSync(root + 'package.json', 'utf8')).version;
+writeFileSync(root + 'www/app.js', readFileSync(root + 'www/app.js', 'utf8').replaceAll('__APP_VERSION__', version));
 let body = readFileSync(root + 'src/index.html', 'utf8');
 body = body.replace(/<link rel="preconnect"[^>]*>\n?/, '').replace(/<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com[^>]*>/, '<link rel="stylesheet" href="fonts/fonts.css">');
 writeFileSync(root + 'www/index.html', `<!doctype html>

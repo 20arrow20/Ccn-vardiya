@@ -49,7 +49,8 @@ section ul { padding-left: 20px; display: grid; gap: 4px; }
       <ul>
         <li><b>Vardiya listesi görselleri:</b> Seçtiğiniz görseller telefonunuzda okunur. Görseller saklanmaz ve hiçbir yere gönderilmez.</li>
         <li><b>Listedeki bilgiler:</b> Görsellerden okunan personel adları ve günlük vardiya / OFF / rapor / izin bilgileri telefonunuzun uygulama belleğinde saklanır.</li>
-        <li><b>Ayarlar:</b> Vardiya saatleri ve bölüm adı gibi ayarlar telefonunuzda saklanır.</li>
+        <li><b>Ayarlar:</b> Vardiya saatleri, bölüm adı ve koyu/açık mod gibi ayarlar telefonunuzda saklanır.</li>
+        <li><b>Hata kayıtları:</b> Uygulamada bir hata olursa hata mesajı telefonunuzda saklanır (en fazla 30 kayıt). Bu kayıtlar personel adı içermez.</li>
       </ul>
     </section>
 
@@ -59,8 +60,18 @@ section ul { padding-left: 20px; display: grid; gap: 4px; }
     </section>
 
     <section>
+      <h2>Hata raporu</h2>
+      <p>Ayarlar’daki <b>Hata raporu gönder</b> düğmesine bastığınızda; uygulama sürümü, telefon modeli ve Android sürümü (tarayıcı kimliği), ekran boyutu, dil, bağlantı durumu, kayıtlı kişi ve liste sayısı ile hata kayıtlarından oluşan bir metin hazırlanır. Bu metin yalnızca sizin seçtiğiniz uygulamayla (örneğin WhatsApp veya e-posta) ve sizin seçtiğiniz kişiye gönderilir. Rapor personel adı içermez ve siz göndermedikçe hiçbir yere gitmez.</p>
+      <p>Google Play, uygulama çökmelerini ve yanıt vermeme durumlarını, telefonunuzda Google ile tanılama verisi paylaşımı açıksa kendi kurallarıyla geliştiriciye anonim olarak raporlayabilir. Bu, Google’ın sistemidir; uygulamanın kendisi veri göndermez.</p>
+    </section>
+
+    <section>
       <h2>İzinler</h2>
-      <p>Uygulama yalnızca sizin seçtiğiniz görsel dosyalarına erişir. Konum, kişiler, mikrofon veya kamera izni kullanmaz.</p>
+      <ul>
+        <li><b>Fotoğraflar:</b> Görsel seçmeden önce uygulama izninizi sorar. Yalnızca sizin seçtiğiniz görseller açılır; izni Ayarlar’dan geri alabilirsiniz.</li>
+        <li><b>İnternet:</b> Yalnızca “Güncellemeleri denetle” ile Google Play sayfasını açmak ve sizin başlattığınız paylaşımlar için kullanılır. Uygulama internete veri göndermez.</li>
+      </ul>
+      <p>Konum, kişiler, mikrofon veya kamera izni kullanılmaz.</p>
     </section>
 
     <section>
@@ -81,7 +92,7 @@ section ul { padding-left: 20px; display: grid; gap: 4px; }
 
     <section class="en" lang="en">
       <h2>Summary in English</h2>
-      <p>CCN Vardiya Programı processes the shift roster images you select entirely on your device. Staff names and shift data read from them are stored only in the app’s local storage on your phone. The app sends no data to the developer or any third party, contains no ads, analytics or tracking, and requires no account. Text is shared only when you tap “Share” and choose an app. You can delete all data in Settings → Delete all data, or by uninstalling the app.</p>
+      <p>CCN Vardiya Programı processes the shift roster images you select entirely on your device. Staff names and shift data read from them are stored only in the app’s local storage on your phone. The app sends no data to the developer or any third party, contains no ads, analytics or tracking, and requires no account. Text is shared only when you tap “Share” and choose an app. An optional error report (app version, device model, Android version, screen size and error messages, no staff names) is created only when you tap “Send error report” and is sent only through the app you choose. You can delete all data in Settings → Delete all data, or by uninstalling the app.</p>
     </section>
   </article>
 </div>

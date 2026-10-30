@@ -72,6 +72,54 @@ function defaultStore() {
   };
 }
 let store = load();
+
+// ---------- Cihaz tercihleri (tema, izinler) ve hata günlüğü: "Tüm verileri sil" bunlara dokunmaz ----------
+const APP_VERSION = /^\d/.test('__APP_VERSION__') ? '__APP_VERSION__' : 'web';
+const PLAY_URL = 'https://play.google.com/store/apps/details?id=com.vardiyapanosu.app';
+const PREFS_KEY = 'ccn-vardiya-prefs', ERR_KEY = 'ccn-vardiya-hatalar';
+const readLS = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
+const writeLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* depolama kapalı */ } };
+const prefs = { theme: 'auto', photoOk: false, ...readLS(PREFS_KEY, {}) };
+function savePrefs() { writeLS(PREFS_KEY, prefs); }
+const HOST_THEME = document.documentElement.getAttribute('data-theme');
+function applyTheme() {
+  const t = prefs.theme === 'auto' ? HOST_THEME : prefs.theme;
+  if (t) document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme');
+  const dark = t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.content = dark ? '#11161c' : '#1f5f8b';
+  // APK: durum çubuğu simgeleri temaya uysun
+  const sb = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SystemBars;
+  if (sb && sb.setStyle) sb.setStyle({ style: prefs.theme === 'auto' ? 'DEFAULT' : dark ? 'DARK' : 'LIGHT' }).catch(() => {});
+}
+applyTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+['online', 'offline'].forEach((ev) => window.addEventListener(ev, () => { if (ui.view === 'ayarlar' && !$overlay.innerHTML) render(); }));
+
+function logError(where, e) {
+  const list = readLS(ERR_KEY, []);
+  list.push({ at: new Date().toISOString(), where, msg: String((e && (e.message || e.reason || e)) || 'bilinmeyen hata').slice(0, 300), stack: String((e && e.stack) || '').split('\n').slice(0, 4).join(' | ').slice(0, 500) });
+  writeLS(ERR_KEY, list.slice(-30));
+}
+window.addEventListener('error', (e) => logError('genel', e.error || e.message));
+window.addEventListener('unhandledrejection', (e) => logError('genel', e.reason));
+function errorReport() {
+  const list = readLS(ERR_KEY, []);
+  return [`CCN Vardiya Programı hata raporu`, `Sürüm: ${APP_VERSION}`, `Tarih: ${new Date().toLocaleString('tr-TR')}`,
+    `Cihaz: ${navigator.userAgent}`, `Ekran: ${screen.width}×${screen.height} @${devicePixelRatio}x`, `Dil: ${navigator.language}`, `Bağlantı: ${navigator.onLine ? 'çevrimiçi' : 'çevrimdışı'}`,
+    `Kayıtlı kişi: ${Object.keys(store.people).length} · Yüklenen liste: ${store.uploads.length}`, '',
+    list.length ? `Son hatalar (${list.length}):` : 'Kayıtlı hata yok.', ...list.map((x) => `- ${x.at} [${x.where}] ${x.msg}${x.stack ? '\n  ' + x.stack : ''}`)].join('\n');
+}
+
+// Görsel seçmeden önce fotoğraf erişimi için izin iste (bir kez; Ayarlar'dan geri alınabilir)
+function askPhotoAccess(then) {
+  sheet(`<div class="permhead">${ICON_IMAGE}<h3>Fotoğraflarınıza erişim</h3></div>
+    <p class="muted" style="margin:0"><b>CCN Vardiya Programı</b>, vardiya listesi görsellerini okuyabilmek için fotoğraflarınıza erişmek istiyor.</p>
+    <ul class="small muted permlist"><li>Yalnızca sizin seçtiğiniz görseller açılır.</li><li>Görseller okunduktan sonra saklanmaz, telefon dışına gönderilmez.</li><li>İzni istediğiniz zaman Ayarlar’dan geri alabilirsiniz.</li></ul>
+    <div class="row"><button class="btn primary" id="pa-ok">İzin ver</button><button class="btn" id="pa-no">İzin verme</button></div>`, (bg) => {
+    bg.querySelector('#pa-ok').addEventListener('click', () => { prefs.photoOk = true; savePrefs(); closeSheet(); then(); });
+    bg.querySelector('#pa-no').addEventListener('click', () => { closeSheet(); toast('Görsel seçmek için fotoğraf izni gerekiyor'); });
+  });
+}
 function normalize(raw) {
   const s = cleanPeople(migrateKeys(raw)); const d = defaultStore();
   return { ...d, ...s, aliases: s.aliases || {}, areas: Array.isArray(s.areas) ? s.areas : d.areas, dayAreas: s.dayAreas || {}, settings: { ...d.settings, ...s.settings, hours: { ...d.settings.hours, ...(s.settings || {}).hours }, colors: { ...d.settings.colors, ...(s.settings || {}).colors } } };
@@ -490,7 +538,31 @@ function viewReview() {
 // ---------- Ayarlar ----------
 function viewSettings() {
   const S = store.settings;
+  const online = navigator.onLine; const errs = readLS(ERR_KEY, []).length;
   return `<div class="card stack">
+    <h2 style="font-size:22px">Görünüm</h2>
+    <div class="seg seg3" role="radiogroup" aria-label="Tema">${[['auto', 'Sistem'], ['light', 'Açık'], ['dark', 'Koyu']].map(([v, l]) => `<button role="radio" data-act="set-theme" data-theme-val="${v}" aria-selected="${prefs.theme === v}" aria-checked="${prefs.theme === v}">${l}</button>`).join('')}</div>
+    <p class="small muted" style="margin:0">“Sistem” seçiliyken telefonun koyu/açık mod ayarı kullanılır.</p>
+  </div>
+  <div class="card stack">
+    <h2 style="font-size:22px">İzinler</h2>
+    <div class="permrow"><span><b>Fotoğraflar</b><br><span class="small muted">Vardiya listesi görsellerini seçmek için</span></span>
+      <span class="pill ${prefs.photoOk ? 'ok' : 'bad'}">${prefs.photoOk ? 'İzin verildi' : 'İzin yok'}</span>
+      <button class="btn" data-act="${prefs.photoOk ? 'photo-revoke' : 'photo-allow'}">${prefs.photoOk ? 'İzni kaldır' : 'İzin ver'}</button></div>
+    <div class="permrow"><span><b>İnternet</b><br><span class="small muted">Güncellemeleri denetlemek için</span></span>
+      <span class="pill ${online ? 'ok' : 'bad'}">${online ? 'Bağlı' : 'Bağlı değil'}</span><span></span></div>
+  </div>
+  <div class="card stack">
+    <h2 style="font-size:22px">Güncelleme</h2>
+    <p class="small muted" style="margin:0">Yüklü sürüm: <b>${esc(APP_VERSION)}</b>. Yeni sürümler Google Play üzerinden gelir.</p>
+    <div class="row"><button class="btn primary" data-act="check-update">Güncellemeleri denetle</button></div>
+  </div>
+  <div class="card stack">
+    <h2 style="font-size:22px">Hata bildirimi</h2>
+    <p class="small muted" style="margin:0">Uygulamada bir sorun olursa hata kaydı telefonda tutulur (${errs ? errs + ' kayıt' : 'kayıt yok'}). “Hata raporu gönder” ile sürüm, telefon modeli, Android sürümü, ekran bilgisi ve hata kayıtlarını içeren raporu seçtiğiniz uygulamayla (WhatsApp, e-posta) gönderebilirsiniz. Rapor siz göndermedikçe hiçbir yere gitmez; isimler rapora eklenmez.</p>
+    <div class="row"><button class="btn" data-act="send-report">Hata raporu gönder</button>${errs ? '<button class="btn" data-act="clear-errors">Kayıtları temizle</button>' : ''}</div>
+  </div>
+  <div class="card stack">
     <h2 style="font-size:22px">Genel</h2>
     <div class="settings-grid">
       <label class="field">Şirket / bölüm adı (paylaşımda görünür)<input type="text" id="set-company" value="${esc(S.company)}" placeholder="Örn. Üretim Bölümü"></label>
@@ -535,6 +607,10 @@ function bindView() {
   if (dp) dp.addEventListener('change', () => { if (dp.value) { ui.date = dp.value; ui.gridStart = null; render(); } });
   const fi = document.getElementById('file-in');
   if (fi) fi.addEventListener('change', () => { if (fi.files.length) handleFiles([...fi.files]); });
+  $app.querySelectorAll('label[for="file-in"]').forEach((l) => l.addEventListener('click', (e) => {
+    if (prefs.photoOk) return;
+    e.preventDefault(); askPhotoAccess(() => document.getElementById('file-in').click());
+  }));
   const drop = document.getElementById('drop');
   if (drop) {
     drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
@@ -603,6 +679,15 @@ const actions = {
       bad.forEach(([k]) => { delete store.people[k]; renameDayAreas(k, null); }); save(); render(); toast(`${bad.length} hatalı kayıt silindi`);
     });
   },
+  'set-theme': (el) => { prefs.theme = el.dataset.themeVal; savePrefs(); applyTheme(); render(); },
+  'photo-allow': () => askPhotoAccess(() => { render(); toast('Fotoğraf izni verildi'); }),
+  'photo-revoke': () => { prefs.photoOk = false; savePrefs(); render(); toast('Fotoğraf izni kaldırıldı'); },
+  'check-update': () => {
+    if (!navigator.onLine) { toast('Güncelleme için internet bağlantısı gerekli'); return; }
+    window.open(PLAY_URL, '_blank');
+  },
+  'send-report': () => doShare(errorReport(), 'CCN Vardiya Programı hata raporu'),
+  'clear-errors': () => { writeLS(ERR_KEY, []); render(); toast('Hata kayıtları temizlendi'); },
   'wipe': () => confirmSheet('Tüm veriler silinsin mi?', 'Yüklenen bütün listeler ve kişiler bu cihazdan silinir. Bu işlem geri alınamaz.', 'Hepsini sil', () => { store = defaultStore(); save(); render(); toast('Tüm veriler silindi'); }),
 };
 
@@ -790,6 +875,7 @@ async function analyzeFile(file) {
     }
   } catch (e) {
     console.error(e);
+    logError('görsel okuma', e);
     toast(`${file.name || 'Görsel'} okunamadı: ${e.message || e}`);
   }
 }

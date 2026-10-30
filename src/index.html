@@ -193,6 +193,16 @@ tr.skip td { opacity: .45; }
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px; }
 .seg button { border: 0; background: transparent; border-radius: 7px; padding: 10px 8px; font-weight: 600; color: var(--muted); min-height: 42px; }
 .seg button[aria-selected="true"] { background: var(--accent); color: var(--accent-fg); }
+.seg.seg3 { grid-template-columns: 1fr 1fr 1fr; }
+.permrow { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding-block: 6px; border-top: 1px solid var(--line); }
+.permrow:first-of-type { border-top: 0; }
+.pill { font-size: 12px; font-weight: 600; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+.pill.ok { background: var(--yi-bg); color: var(--yi); }
+.pill.bad { background: var(--off-bg); color: var(--off); }
+.permhead { display: flex; align-items: center; gap: 10px; }
+.permhead svg { width: 28px; height: 28px; color: var(--accent); flex: none; }
+.permhead h3 { margin: 0; }
+.permlist { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .shiftchips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .chip.shiftchip { border-radius: 10px; min-height: 54px; display: grid; place-items: center; gap: 0; line-height: 1.2; font-size: 15px; }
 .chip.shiftchip small { font-weight: 500; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }

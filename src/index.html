@@ -251,6 +251,19 @@ button.pchip:hover { border-color: var(--accent); }
 .aiok svg { width: 18px; height: 18px; color: var(--yi); flex: none; }
 .aibad { background: var(--off-bg); border: 1px solid var(--off); }
 .aibad span { flex: 1 1 220px; }
+.wipebox { gap: 10px; flex-wrap: nowrap; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--off); border-radius: 8px; background: var(--off-bg); font-size: 14px; }
+.wipebox input { width: 20px; height: 20px; flex: none; margin-top: 1px; accent-color: var(--off); }
+/* Kişi ara */
+input[type="search"] { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px 10px; min-height: 44px; font-size: 16px; width: 100%; }
+.pstat { display: grid; gap: 2px; padding: 12px 14px; border-radius: 10px; background: var(--kb); border: 1px solid var(--k); }
+.pstat span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pstat b { font-family: var(--font-display); font-size: 20px; color: var(--fg); }
+.pdays { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 6px; }
+.pday { border: 1px solid var(--line); border-radius: 8px; background: var(--kb); padding: 4px 2px; display: grid; gap: 1px; justify-items: center; }
+.pday span { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pday b { font-size: 14px; color: var(--k); }
+.k-OFF.pday b { color: var(--off); }
+.pday.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* Toplamlar */
 .shift-head .tot { font-size: 12px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
 .shift-head .tot b { color: var(--fg); font-weight: 700; }
@@ -283,6 +296,7 @@ table.grid td.name.rv { max-width: none; overflow: visible; }
     </div>
     <nav class="tabs" aria-label="Bölümler">
       <button class="tab" data-view="gunluk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 15h3"/></svg>Günlük</button>
+      <button class="tab" data-view="ara"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Kişi Ara</button>
       <button class="tab" data-view="cizelge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>Çizelge</button>
       <button class="tab" data-view="yukle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/></svg>Liste Yükle</button>
       <button class="tab" data-view="ayarlar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Ayarlar</button>

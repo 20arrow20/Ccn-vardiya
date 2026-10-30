@@ -181,6 +181,7 @@ const ui = {
   review: null,     // görsel analizi sonrası düzenleme taslağı
   busy: null,       // { text, pct }
   collapsed: {},
+  q: '',
 };
 const $app = document.getElementById('app');
 const $overlay = document.getElementById('overlay');
@@ -193,7 +194,7 @@ function dataRange() {
 }
 
 // ---------- Yönlendirme ----------
-const VIEWS = ['gunluk', 'cizelge', 'yukle', 'ayarlar'];
+const VIEWS = ['gunluk', 'ara', 'cizelge', 'yukle', 'ayarlar'];
 function go(view) {
   ui.view = VIEWS.includes(view) ? view : 'gunluk'; render(); window.scrollTo(0, 0);
   try { if (location.hash !== '#' + ui.view) location.hash = ui.view; } catch (e) { /* çerçeve izin vermezse yoksay */ }
@@ -207,19 +208,28 @@ function render() {
   const sub = document.getElementById('brand-sub');
   sub.textContent = store.settings.company ? store.settings.company : '1 · 2 · 3 vardiya, OFF ve izin takibi';
   const banner = store.demo ? `<div class="banner"><p><b>Örnek veri gösteriliyor.</b> Kendi vardiya listenizin görselini “Liste Yükle” bölümünden ekleyin; örnek veri o zaman silinir.</p><button class="btn" data-act="clear-demo">Örnek veriyi temizle</button></div>` : '';
-  const views = { gunluk: viewDaily, cizelge: viewGrid, yukle: viewUpload, ayarlar: viewSettings };
+  const views = { gunluk: viewDaily, ara: viewSearch, cizelge: viewGrid, yukle: viewUpload, ayarlar: viewSettings };
   $app.innerHTML = banner + views[ui.view]();
   bindView();
 }
 
 // ---------- Günlük görünüm ----------
+// OFF / rapor / izin günü hangi vardiyanın sayılır: kişinin bu günden sonra ilk çalıştığı vardiya
+// (3. vardiyadan çıkıp OFF sonrası 1. vardiyaya başlayanın OFF'u 1. vardiya OFF'udur); sonrası yoksa önceki vardiyası
+function absenceShift(p, date) {
+  const isShift = (c) => c === '1' || c === '2' || c === '3';
+  for (let i = 1; i <= 31; i++) { const c = p.days[addDays(date, i)]; if (isShift(c)) return c; }
+  for (let i = 1; i <= 31; i++) { const c = p.days[addDays(date, -i)]; if (isShift(c)) return c; }
+  return p.group || '';
+}
 function dayLists(date) {
   const people = allPeople();
   const out = {};
+  const absShift = {}; for (const p of people) if (p.days[date] && !['1', '2', '3'].includes(p.days[date])) absShift[p.key] = absenceShift(p, date);
   for (const g of ['1', '2', '3']) {
     const working = people.filter((p) => p.days[date] === g).sort(cmpName);
     const absent = {};
-    for (const a of ABSENT) absent[a.code] = people.filter((p) => p.group === g && p.days[date] === a.code).sort(cmpName);
+    for (const a of ABSENT) absent[a.code] = people.filter((p) => p.days[date] === a.code && absShift[p.key] === g).sort(cmpName);
     const unknown = people.filter((p) => p.group === g && !p.days[date]).sort(cmpName);
     out[g] = { working, absent, unknown };
   }
@@ -294,6 +304,39 @@ function shareText(date, which) {
   const head = `${store.settings.company ? store.settings.company + ' · ' : ''}${fmtShort(date)}`;
   const groups = which === 'all' ? ['1', '2', '3'] : [which];
   return [head, ...groups.map(block)].join('\n\n');
+}
+
+// ---------- Kişi ara ----------
+function statusOf(p, date) {
+  const c = p.days[date];
+  if (!c) return { cls: 'k-', text: 'Bu gün için kayıt yok' };
+  if (['1', '2', '3'].includes(c)) return { cls: 'k-' + c, text: `${c}. Vardiya — çalışıyor${store.settings.hours[c] ? ' (' + store.settings.hours[c] + ')' : ''}` };
+  const g = absenceShift(p, date); const sh = g ? ` (${g}. vardiya)` : '';
+  return { cls: 'k-' + c, text: ({ OFF: 'OFF', R: 'Raporlu', YI: 'Yıllık izinli', MI: 'İzinli' }[c] || c) + sh };
+}
+function viewSearch() {
+  const t = todayIso();
+  return `<div class="card stack">
+    <h2 style="font-size:24px">Kişi ara</h2>
+    <label class="field">İsim<input type="search" id="q" value="${esc(ui.q || '')}" placeholder="Ad veya soyad yazın" autocomplete="off"></label>
+    <div class="row"><label class="field" style="flex:1">Gün<input type="date" id="date-pick" value="${ui.date}"></label>
+      <button class="chip" data-act="set-date" data-date="${t}" aria-pressed="${ui.date === t}">Bugün</button><button class="chip" data-act="set-date" data-date="${addDays(t, 1)}" aria-pressed="${ui.date === addDays(t, 1)}">Yarın</button></div>
+  </div>
+  <div id="ara-res" class="stack">${searchResults()}</div>`;
+}
+function searchResults() {
+  const q = nameKey(ui.q || ''); if (!q) return `<p class="muted">İsim yazınca kişinin ${fmtShort(ui.date)} günündeki durumu ve tüm çalışma günleri görünür.</p>`;
+  const hits = allPeople().filter((p) => nameKey(p.name).includes(q)).sort(cmpName).slice(0, 20);
+  if (!hits.length) return `<p class="muted">“${esc(ui.q)}” adında kimse bulunamadı.</p>`;
+  return hits.map((p) => {
+    const st = statusOf(p, ui.date);
+    const days = Object.keys(p.days).sort();
+    return `<section class="card stack person">
+      <div class="row"><h3 style="font-size:20px;flex:1;min-width:0">${esc(p.name)}</h3>${p.group ? `<span class="gtag k-${p.group}">${p.group}. vardiya ekibi</span>` : ''}</div>
+      <div class="pstat ${st.cls}"><span>${fmtShort(ui.date)}</span><b>${esc(st.text)}</b></div>
+      <div class="pdays">${days.map((d) => { const c = p.days[d]; return `<button class="pday k-${c} ${d === ui.date ? 'sel' : ''}" data-act="set-date" data-date="${d}"><span>${fmtShort(d).slice(0, 5)}</span><b>${CODES[c] ? CODES[c].short : c}</b></button>`; }).join('')}</div>
+    </section>`;
+  }).join('');
 }
 
 // ---------- Yardımcılar ----------
@@ -432,6 +475,7 @@ function viewReview() {
     <div class="row"><div style="flex:1;min-width:0"><div class="eyebrow">Kontrol et ve düzelt</div><h2 style="font-size:24px">${R.parts.length} görsel · ${people} kişi</h2></div>
       <button class="btn" data-act="rv-cancel">Vazgeç</button><button class="btn primary" data-act="rv-save">${ICON_CHECK}Hepsini kaydet</button></div>
     ${claudeNote}
+    ${Object.keys(store.people).length ? `<label class="row wipebox"><input type="checkbox" id="rv-wipe" ${R.wipe ? 'checked' : ''}> <span><b>Eski kayıtları sil</b>, yalnızca bu listeleri kullan (${Object.keys(store.people).length} kayıtlı kişi silinir)</span></label>` : ''}
     <p class="small muted" style="margin:0">Tüm görsellerdeki isimler tek listede toplandı. Aynı isim birden fazla görselde varsa tek satırda birleşir. Hücreye dokunarak değiştirin; “?” okunamayan hücredir.</p>
     ${warn}
     <div class="parts">${parts}
@@ -469,8 +513,13 @@ function viewSettings() {
 const SWATCH = { red: '#e02828', orange: '#f08a1c', yellow: '#f2cf1d', green: '#2fa84f', blue: '#2f7de1', purple: '#8e44c9', gray: '#9aa3ad' };
 
 // ---------- Olaylar ----------
+function bindResults() {
+  const r = document.getElementById('ara-res'); if (!r) return;
+  r.querySelectorAll('[data-act]').forEach((el) => { if (el.dataset.bound) return; el.dataset.bound = '1'; el.addEventListener('click', (e) => { e.preventDefault(); actions[el.dataset.act] && actions[el.dataset.act](el); }); });
+}
 function bindView() {
   $app.querySelectorAll('[data-act]').forEach((el) => {
+    el.dataset.bound = '1';
     const act = el.dataset.act;
     if (el.tagName === 'INPUT') {
       if (act === 'rv-name') el.addEventListener('change', () => renameReviewRow(el.dataset.key, el.value));
@@ -479,6 +528,9 @@ function bindView() {
     }
     el.addEventListener('click', (e) => { e.preventDefault(); actions[act] && actions[act](el); });
   });
+  const qi = document.getElementById('q');
+  if (qi) qi.addEventListener('input', () => { ui.q = qi.value; document.getElementById('ara-res').innerHTML = searchResults(); bindResults(); });
+  bindResults();
   const dp = document.getElementById('date-pick');
   if (dp) dp.addEventListener('change', () => { if (dp.value) { ui.date = dp.value; ui.gridStart = null; render(); } });
   const fi = document.getElementById('file-in');
@@ -492,6 +544,7 @@ function bindView() {
   if (ui.view === 'yukle' && ui.review && !ui.busy) {
     for (const P of ui.review.parts) { const cv = document.getElementById('rv-cv-' + P.id); cv.width = P.preview.width; cv.height = P.preview.height; cv.getContext('2d').drawImage(P.preview, 0, 0); }
     const part = (el) => ui.review.parts.find((P) => P.id === el.dataset.id);
+    const wb = document.getElementById('rv-wipe'); if (wb) wb.addEventListener('change', () => { ui.review.wipe = wb.checked; });
     $app.querySelectorAll('.rv-group').forEach((el) => el.addEventListener('change', () => { part(el).group = el.value; render(); }));
     $app.querySelectorAll('.rv-start').forEach((el) => el.addEventListener('change', () => {
       if (!el.value) return; const P = part(el);
@@ -648,7 +701,7 @@ function saveReview() {
   const M = mergedReview();
   const rows = M.rows.filter((m) => !isSkipped(m) && m.name);
   if (!rows.length) { toast('Kaydedilecek kişi yok. İsimleri yazın ya da satırları işaretleyin.'); return; }
-  if (store.demo) { store.people = {}; store.uploads = []; store.dayAreas = {}; store.demo = false; }
+  if (store.demo || R.wipe) { store.people = {}; store.uploads = []; store.dayAreas = {}; store.aliases = {}; store.demo = false; }
   for (const m of rows) {
     let k = nameKey(m.name);
     if (!store.people[k]) {
@@ -852,13 +905,17 @@ function detectGrid(px, w, h) {
   let best = null;
   for (const [mh, mvIn] of variants) {
     const mv = mvIn || mh;
+    // en çok satır çizgisi veren eşik seçilir (birleştirilmiş hücreli sütun yatay çizgileri bölebilir); 0.22 yalnızca son çare
+    let got = null;
     for (const frac of [0.5, 0.35, 0.22]) {
+      if (frac === 0.22 && got) break;
       const hs = findBands(mh, w, h, true, Math.round(w * frac), 0, w, maxThick);
       if (hs.length < 3) continue;
       const top = Math.floor(hs[0].a), bot = Math.ceil(hs[hs.length - 1].b);
       const vs = findBands(mv, w, h, false, Math.round((bot - top) * 0.5), top, bot + 1, maxThick);
-      if (vs.length >= 3) { if (!best || hs.length * vs.length > best.hs.length * best.vs.length) best = { hs, vs }; break; }
+      if (vs.length >= 3 && (!got || hs.length > got.hs.length)) got = { hs, vs };
     }
+    if (got && (!best || got.hs.length * got.vs.length > best.hs.length * best.vs.length)) best = got;
   }
   return best;
 }
@@ -1244,14 +1301,58 @@ function findTables(img) {
   const sets = {}; L.forEach((b, i) => { (sets[find(i)] = sets[find(i)] || []).push(b); });
   let regs = Object.values(sets).map((g) => {
     const ys = g.map((b) => b.y0).sort((a, b) => a - b); const gaps = ys.slice(1).map((y, i) => y - ys[i]).sort((a, b) => a - b);
-    return { x0: Math.min(...g.map((b) => b.x0)), x1: Math.max(...g.map((b) => b.x1)), y0: Math.min(...g.map((b) => b.y0)), y1: Math.max(...g.map((b) => b.y1)), n: g.length, rowH: gaps[Math.floor(gaps.length / 2)] || 0 };
+    return { x0: Math.min(...g.map((b) => b.x0)), x1: Math.max(...g.map((b) => b.x1)), y0: Math.min(...g.map((b) => b.y0)), y1: Math.max(...g.map((b) => b.y1)), n: g.length, rowH: gaps[Math.floor(gaps.length / 2)] || 0, ys };
   }).sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+  // Yan yana parçalar aynı tablonun bölünmüşü mü? (birleştirilmiş hücreli bir sütun yatay çizgileri keser)
+  // Satır çizgileri aynı hizadaysa ve aradaki boşluk boş değilse (yazı/çizgi varsa) tek tablodur.
+  const inkIn = (x0, x1, y0, y1) => { let n = 0, t = 0; for (let y = y0; y < y1; y += 2) for (let x = x0; x < x1; x++) { t++; if (v[y * w + x] < 200) n++; } return t ? n / t : 0; };
+  for (let i = 0; i < regs.length; i++) for (let j = 0; j < regs.length; j++) {
+    if (i === j) continue; const A = regs[i], B = regs[j]; if (!A || !B || B.x0 < A.x1 - 4) continue;
+    const ov = Math.min(A.y1, B.y1) - Math.max(A.y0, B.y0); if (ov < 0.6 * Math.min(A.y1 - A.y0, B.y1 - B.y0)) continue;
+    const match = A.ys.filter((y) => B.ys.some((z) => Math.abs(z - y) <= 4)).length;
+    if (match < 0.6 * Math.min(A.ys.length, B.ys.length) || match < 3) continue;
+    const gap = B.x0 - A.x1;
+    // aradan tablonun üst/alt çerçevesi geçiyorsa (ya da aralık yazı/çizgi doluysa) aynı tablo; tamamen boşsa ayrı tablolar
+    const crosses = (yc) => { for (let y = Math.max(0, yc - 4); y <= Math.min(h - 1, yc + 4); y++) { let n = 0; for (let x = A.x1 + 1; x < B.x0; x++) if (hm[y * w + x]) n++; if (n >= (B.x0 - A.x1 - 1) * 0.8) return true; } return false; };
+    const top = Math.max(A.y0, B.y0), bot = Math.min(A.y1, B.y1);
+    const rh2 = Math.max(A.rowH, B.rowH, 16);
+    const spans = L.some((b) => b.x0 <= A.x0 + 10 && b.x1 >= B.x1 - 10 && b.y0 >= top - 4 * rh2 && b.y0 <= bot + 4 * rh2);
+    if (gap > 12 && (gap > w * 0.25 || !(spans || crosses(top) || crosses(bot) || inkIn(A.x1 + 2, B.x0 - 2, top, bot) > 0.05))) continue;
+    regs[i] = { x0: Math.min(A.x0, B.x0), x1: Math.max(A.x1, B.x1), y0: Math.min(A.y0, B.y0), y1: Math.max(A.y1, B.y1), n: Math.max(A.n, B.n), rowH: Math.max(A.rowH, B.rowH), ys: [...new Set([...A.ys, ...B.ys])].sort((a, b) => a - b) };
+    regs.splice(j, 1); if (j < i) i--; j = -1;
+  }
   // aynı genişlikte ve arası bir satırdan az olan parçalar aynı tablodur (soluk çizgi yüzünden bölünmüş)
   for (let i = 0; i < regs.length; i++) for (let j = i + 1; j < regs.length; j++) {
     const A = regs[i], B = regs[j]; const rh = Math.max(A.rowH, B.rowH, 20);
     if (Math.abs(A.x0 - B.x0) < w * 0.02 && Math.abs(A.x1 - B.x1) < w * 0.02 && B.y0 - A.y1 >= -2 && B.y0 - A.y1 < rh * 0.8) {
-      regs[i] = { x0: Math.min(A.x0, B.x0), x1: Math.max(A.x1, B.x1), y0: A.y0, y1: Math.max(A.y1, B.y1), n: A.n + B.n, rowH: rh };
+      regs[i] = { x0: Math.min(A.x0, B.x0), x1: Math.max(A.x1, B.x1), y0: A.y0, y1: Math.max(A.y1, B.y1), n: A.n + B.n, rowH: rh, ys: [...A.ys, ...B.ys] };
       regs.splice(j, 1); j = i;
+    }
+  }
+  // iç içe geçen bölgeler (tablonun tam boy çerçeve çizgileri + bölünmüş iç çizgileri) tek tablodur
+  for (let i = 0; i < regs.length; i++) for (let j = i + 1; j < regs.length; j++) {
+    const A = regs[i], B = regs[j];
+    const ox = Math.min(A.x1, B.x1) - Math.max(A.x0, B.x0), oy = Math.min(A.y1, B.y1) - Math.max(A.y0, B.y0);
+    if (ox <= 0 || oy <= 0) continue;
+    const small = Math.min((A.x1 - A.x0) * (A.y1 - A.y0), (B.x1 - B.x0) * (B.y1 - B.y0));
+    if (ox * oy < 0.7 * small) continue;
+    const rhs = [A.rowH, B.rowH].filter((x) => x > 4);
+    regs[i] = { x0: Math.min(A.x0, B.x0), x1: Math.max(A.x1, B.x1), y0: Math.min(A.y0, B.y0), y1: Math.max(A.y1, B.y1), n: A.n + B.n, rowH: rhs.length ? Math.min(...rhs) : 0, ys: [...new Set([...A.ys, ...B.ys])].sort((a, b) => a - b) };
+    regs.splice(j, 1); j = i;
+  }
+  // tablonun genişliğini kaplayan, hemen üstündeki/altındaki çizgiler (başlık / tarih satırı) de tabloya dahil
+  for (const r of regs) {
+    let grown = true;
+    while (grown) {
+      grown = false; const rh3 = Math.max(r.rowH, 16);
+      for (const b of L) {
+        const cover = Math.min(b.x1, r.x1) - Math.max(b.x0, r.x0);
+        if (cover < 0.8 * (r.x1 - r.x0)) continue;
+        // başka bir tabloya ait çizgi alınmaz
+        if (regs.some((o) => o !== r && o.n >= 3 && b.y0 >= o.y0 - 2 && b.y0 <= o.y1 + 2 && Math.min(o.x1, b.x1) - Math.max(o.x0, b.x0) > 0)) continue;
+        if (b.y0 < r.y0 && b.y0 >= r.y0 - 1.6 * rh3) { r.y0 = b.y0; r.n++; grown = true; }
+        else if (b.y1 > r.y1 && b.y1 <= r.y1 + 1.6 * rh3) { r.y1 = b.y1; r.n++; grown = true; }
+      }
     }
   }
   return regs.filter((r) => r.n >= 3 && r.x1 - r.x0 > w * 0.15 && r.y1 - r.y0 > Math.max(30, r.rowH * 1.5))

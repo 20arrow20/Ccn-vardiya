@@ -1,14 +1,14 @@
-VARDIYA PANOSU - GOOGLE PLAY MAGAZA METINLERI
+VARDIYA PROGRAMI - GOOGLE PLAY MAGAZA METINLERI
 (Play Console > Buyume > Magaza varligi > Ana magaza girisi)
 
 UYGULAMA ADI (en fazla 30 karakter):
-Vardiya Panosu
+Vardiya Programı
 
 KISA ACIKLAMA (en fazla 80 karakter):
 Vardiya listesi görselinden günlük 1-2-3 vardiya, OFF ve izin listesi çıkarın.
 
 TAM ACIKLAMA (en fazla 4000 karakter):
-Vardiya Panosu, işyerinizin gönderdiği vardiya listesi görsellerini okuyup her gün için 1., 2. ve 3. vardiya listelerini hazırlar.
+Vardiya Programı, işyerinizin gönderdiği vardiya listesi görsellerini okuyup her gün için 1., 2. ve 3. vardiya listelerini hazırlar.
 
 Nasıl çalışır?
 • Vardiya listesi görsellerini (ekran görüntüsü ya da fotoğraf) birlikte seçin.

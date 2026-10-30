@@ -1,5 +1,5 @@
 'use strict';
-/* Vardiya Panosu — vardiya listesi görsellerinden 1/2/3 vardiya, OFF, rapor ve izin listeleri çıkarır.
+/* Vardiya Programı — vardiya listesi görsellerinden 1/2/3 vardiya, OFF, rapor ve izin listeleri çıkarır.
    Tüm veri cihazda (localStorage) tutulur; APK (Capacitor) içinde de aynı kod çalışır. */
 
 // ---------- Sabitler ----------

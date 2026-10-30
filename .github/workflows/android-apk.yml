@@ -20,23 +20,27 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
       - run: npm ci
       - run: npm run android:sync
-      - name: APK derle
-        run: cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+      - name: APK ve Play paketi (AAB) derle
+        run: cd android && chmod +x gradlew && ./gradlew assembleDebug bundleRelease --no-daemon
       - name: APK adlandır
         run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           cp android/app/build/outputs/apk/debug/app-debug.apk "VardiyaPanosu-$VERSION-${GITHUB_RUN_NUMBER}.apk"
+          # imzasız Play paketi; yükleme anahtarıyla depo dışında imzalanır
+          cp android/app/build/outputs/bundle/release/app-release.aab "VardiyaPanosu-$VERSION-${GITHUB_RUN_NUMBER}-imzasiz.aab"
       - uses: actions/upload-artifact@v4
         with:
           name: vardiya-panosu-apk
-          path: VardiyaPanosu-*.apk
+          path: |
+            VardiyaPanosu-*.apk
+            VardiyaPanosu-*.aab
       - name: APK'yı ayrı dala koy
         run: |
-          mkdir /tmp/apkbranch && cp VardiyaPanosu-*.apk /tmp/apkbranch/
+          mkdir /tmp/apkbranch && cp VardiyaPanosu-*.apk VardiyaPanosu-*.aab /tmp/apkbranch/
           cd /tmp/apkbranch
           git init -q -b vardiya-panosu-apk
           git config user.name "github-actions" && git config user.email "github-actions@users.noreply.github.com"

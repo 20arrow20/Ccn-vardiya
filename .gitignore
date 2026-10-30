@@ -3,3 +3,5 @@ www/
 src/vendor/
 *.apk
 android/local.properties
+*.aab
+*.jks

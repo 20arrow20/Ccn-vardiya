@@ -1,6 +1,6 @@
 {
   "appId": "com.vardiyapanosu.app",
-  "appName": "Vardiya Programı",
+  "appName": "CCN Vardiya Programı",
   "webDir": "www",
   "android": {
     "allowMixedContent": false

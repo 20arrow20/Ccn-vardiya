@@ -19,7 +19,23 @@ writeFileSync(root + 'src/vendor/lang/tur.b64.txt', readFileSync(nm + '@tesserac
 mkdirSync(root + 'www', { recursive: true });
 for (const f of readdirSync(root + 'www')) rmSync(root + 'www/' + f, { recursive: true, force: true });
 cpSync(root + 'src', root + 'www', { recursive: true });
-const body = readFileSync(root + 'src/index.html', 'utf8');
+// Yazı tipleri uygulamanın içine gömülür (APK internete çıkmaz, çevrimdışı çalışır)
+mkdirSync(root + 'www/fonts', { recursive: true });
+let fontCss = '';
+for (const [pkg, weights] of [['barlow', [400, 500, 600]], ['barlow-semi-condensed', [500, 600, 700]]]) {
+  for (const wgt of weights) {
+    const css = readFileSync(nm + '@fontsource/' + pkg + '/' + wgt + '.css', 'utf8');
+    for (const block of css.split('/* ').slice(1)) {
+      if (!/-latin(-ext)?-\d+-normal \*\//.test(block)) continue;
+      const file = block.match(/files\/([^)]+\.woff2)/)[1];
+      cpSync(nm + '@fontsource/' + pkg + '/files/' + file, root + 'www/fonts/' + file);
+      fontCss += '/* ' + block.replace(/src: [^;]+;/, `src: url(${file}) format('woff2');`);
+    }
+  }
+}
+writeFileSync(root + 'www/fonts/fonts.css', fontCss);
+let body = readFileSync(root + 'src/index.html', 'utf8');
+body = body.replace(/<link rel="preconnect"[^>]*>\n?/, '').replace(/<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com[^>]*>/, '<link rel="stylesheet" href="fonts/fonts.css">');
 writeFileSync(root + 'www/index.html', `<!doctype html>
 <html lang="tr">
 <head>

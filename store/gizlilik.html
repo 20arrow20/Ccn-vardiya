@@ -1,0 +1,87 @@
+<title>Vardiya Panosu Gizlilik Politikası</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Barlow:wght@400;600&display=swap">
+<style>
+/* Düzen: tek sütunlu, okunaklı yasal metin; başlıkta uygulamanın üç vardiya rengi */
+:root {
+  --bg: #f4f6f8; --paper: #ffffff; --fg: #17202b; --muted: #5b6876; --line: #d5dbe2; --accent: #1f5f8b;
+  --s1: #c77700; --s2: #0f7c74; --s3: #4b4fb8;
+  --display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #11161c; --paper: #1a2129; --fg: #e6ebf0; --muted: #9aa7b4; --line: #2f3a46; --accent: #6fb1e0; --s1: #f0a63a; --s2: #4fc9bd; --s3: #9a9df2; color-scheme: dark; } }
+:root[data-theme="dark"] { --bg: #11161c; --paper: #1a2129; --fg: #e6ebf0; --muted: #9aa7b4; --line: #2f3a46; --accent: #6fb1e0; --s1: #f0a63a; --s2: #4fc9bd; --s3: #9a9df2; color-scheme: dark; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 16px; line-height: 1.6; }
+.wrap { max-width: 720px; margin: 0 auto; padding-block: 32px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.doc { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: clamp(20px, 5vw, 40px); display: grid; gap: 22px; }
+.mark { display: flex; gap: 4px; }
+.mark i { width: 8px; height: 26px; border-radius: 2px; }
+.mark i:nth-child(1) { background: var(--s1); } .mark i:nth-child(2) { background: var(--s2); } .mark i:nth-child(3) { background: var(--s3); }
+header { display: grid; gap: 10px; }
+h1 { font-family: var(--display); font-size: clamp(28px, 6vw, 38px); line-height: 1.1; margin: 0; text-wrap: balance; }
+.meta { color: var(--muted); font-size: 14px; }
+h2 { font-family: var(--display); font-size: 21px; margin: 0 0 6px; }
+section p, section ul { margin: 0; }
+section ul { padding-left: 20px; display: grid; gap: 4px; }
+.summary { border-left: 4px solid var(--accent); padding: 4px 0 4px 14px; font-weight: 600; }
+.contact { font-family: ui-monospace, Menlo, monospace; font-size: 15px; user-select: all; }
+.en { border-top: 1px solid var(--line); padding-top: 18px; color: var(--muted); font-size: 15px; }
+.en h2 { color: var(--fg); }
+</style>
+
+<div class="wrap">
+  <article class="doc">
+    <header>
+      <div class="mark" aria-hidden="true"><i></i><i></i><i></i></div>
+      <h1>Vardiya Panosu Gizlilik Politikası</h1>
+      <div class="meta">Son güncelleme: 30.10.2026</div>
+    </header>
+
+    <p class="summary">Vardiya Panosu topladığı hiçbir bilgiyi bir sunucuya göndermez. Yüklediğiniz vardiya listeleri ve okunan isimler yalnızca telefonunuzda saklanır.</p>
+
+    <section>
+      <h2>Uygulama ne yapar</h2>
+      <p>Vardiya Panosu, işyerinizin gönderdiği vardiya listesi görsellerini okuyup günlük 1., 2. ve 3. vardiya listelerini, OFF, raporlu ve izinli personeli gösteren bir Android uygulamasıdır.</p>
+    </section>
+
+    <section>
+      <h2>İşlenen bilgiler</h2>
+      <ul>
+        <li><b>Vardiya listesi görselleri:</b> Seçtiğiniz görseller telefonunuzda okunur. Görseller saklanmaz ve hiçbir yere gönderilmez.</li>
+        <li><b>Listedeki bilgiler:</b> Görsellerden okunan personel adları ve günlük vardiya / OFF / rapor / izin bilgileri telefonunuzun uygulama belleğinde saklanır.</li>
+        <li><b>Ayarlar:</b> Vardiya saatleri ve bölüm adı gibi ayarlar telefonunuzda saklanır.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Paylaşım</h2>
+      <p>Uygulama hiçbir bilgiyi bize ya da üçüncü kişilere göndermez. Reklam, analiz veya izleme aracı içermez; hesap açmanızı istemez. Yalnızca siz “Paylaş” düğmesine bastığınızda, oluşturulan liste metni sizin seçtiğiniz uygulamaya (örneğin WhatsApp) gönderilir.</p>
+    </section>
+
+    <section>
+      <h2>İzinler</h2>
+      <p>Uygulama yalnızca sizin seçtiğiniz görsel dosyalarına erişir. Konum, kişiler, mikrofon veya kamera izni kullanmaz.</p>
+    </section>
+
+    <section>
+      <h2>Verilerin silinmesi</h2>
+      <p>Tüm kayıtları uygulamada <b>Ayarlar → Tüm verileri sil</b> ile silebilirsiniz. Uygulamayı kaldırdığınızda telefonunuzdaki bütün uygulama verileri de silinir. Bizde sizden alınmış bir kopya bulunmaz.</p>
+    </section>
+
+    <section>
+      <h2>Çocuklar</h2>
+      <p>Uygulama iş yerlerindeki vardiya planlaması için hazırlanmıştır, çocuklara yönelik değildir.</p>
+    </section>
+
+    <section>
+      <h2>Değişiklikler ve iletişim</h2>
+      <p>Bu politika değişirse güncel hali bu sayfada yayınlanır. Sorularınız için:</p>
+      <p class="contact">[İLETİŞİM E-POSTASI]</p>
+    </section>
+
+    <section class="en" lang="en">
+      <h2>Summary in English</h2>
+      <p>Vardiya Panosu processes the shift roster images you select entirely on your device. Staff names and shift data read from them are stored only in the app’s local storage on your phone. The app sends no data to the developer or any third party, contains no ads, analytics or tracking, and requires no account. Text is shared only when you tap “Share” and choose an app. You can delete all data in Settings → Delete all data, or by uninstalling the app.</p>
+    </section>
+  </article>
+</div>

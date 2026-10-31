@@ -477,7 +477,7 @@ function viewGrid() {
 
 // ---------- Yükleme / inceleme ----------
 function viewUpload() {
-  if (ui.busy) return `<div class="card stack"><h2>Görseller okunuyor…</h2><p class="muted" id="busy-text">${esc(ui.busy.text)}</p><div class="progress"><i id="busy-bar" style="width:${Math.round(ui.busy.pct * 100)}%"></i></div>${nativeOcr() ? '' : '<p class="small muted">İlk okumada metin tanıma modeli yüklenir; birkaç saniye sürebilir.</p>'}</div>`;
+  if (ui.busy) return `<div class="card stack"><h2>Görseller okunuyor…</h2><p class="muted" id="busy-text">${esc(ui.busy.text)}</p><div class="progress"><i id="busy-bar" style="width:${Math.round(ui.busy.pct * 100)}%"></i></div><p class="small muted">İlk okumada metin tanıma modeli yüklenir; birkaç saniye sürebilir.</p></div>`;
   if (ui.review) return viewReview();
   const ups = store.uploads.slice().reverse();
   return `<div class="card stack">
@@ -1110,50 +1110,9 @@ async function mapLimit(items, n, fn) {
   await Promise.all(Array.from({ length: Math.max(1, n) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); } }));
   return out;
 }
-// "Liste Yükle" açılınca model önceden yüklenir: görsel seçilene kadar hazır olur (APK'da gerekmez: ML Kit var)
-function prewarmOcr() { if (window.Tesseract && !workerP && !nativeOcr()) setTimeout(() => getWorker(null).catch(() => {}), 400); }
+// "Liste Yükle" açılınca model önceden yüklenir: görsel seçilene kadar hazır olur
+function prewarmOcr() { if (window.Tesseract && !workerP) setTimeout(() => getWorker(null).catch(() => {}), 400); }
 
-// ---------- Telefonun kendi metin tanıması (APK: Google ML Kit) ----------
-// Bütün tablo tek seferde, telefonun yerel metin tanımasıyla okunur; Tesseract'tan kat kat hızlıdır.
-// Tarayıcıda yoktur; hata verirse Tesseract'a dönülür.
-function nativeOcr() {
-  const C = window.Capacitor;
-  return !window.__noNative && C && C.isNativePlatform && C.isNativePlatform() && C.Plugins && C.Plugins.Ocr && C.Plugins.Ocr.recognize ? C.Plugins.Ocr : null;
-}
-async function mlkitRead(canvas) {
-  const N = nativeOcr(); if (!N) return null;
-  try {
-    const t0 = performance.now();
-    const res = await N.recognize({ image: canvas.toDataURL('image/jpeg', 0.92) });
-    const sx = canvas.width / (res.width || canvas.width), sy = canvas.height / (res.height || canvas.height);
-    const B = (b) => (b && b.length === 4 ? [b[0] * sx, b[1] * sy, b[2] * sx, b[3] * sy] : null);
-    const lines = [], els = [];
-    for (const l of res.lines || []) {
-      const lb = B(l.b); if (lb) lines.push({ t: l.t || '', b: lb });
-      for (const e of l.e || []) { const b = B(e.b); if (b && e.t) els.push({ t: e.t, b, s: (e.s || []).map((q) => ({ t: q.t, b: B(q.b) })).filter((q) => q.b) }); }
-    }
-    window.__mlInfo = { nativeMs: res.ms, totalMs: Math.round(performance.now() - t0), words: els.length };
-    return { lines, els };
-  } catch (e) { logError('yerel metin tanıma', e); return null; }
-}
-// Bir dikdörtgenin içindeki kelimeler (merkezine göre): satır satır, soldan sağa
-function mlWords(ml, x0, y0, x1, y1) {
-  const got = ml.els.filter((e) => { const cx = (e.b[0] + e.b[2]) / 2, cy = (e.b[1] + e.b[3]) / 2; return cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1; });
-  got.sort((a, b) => { const hh = Math.min(a.b[3] - a.b[1], b.b[3] - b.b[1]) * 0.5; return Math.abs(a.b[1] - b.b[1]) > hh ? a.b[1] - b.b[1] : a.b[0] - b.b[0]; });
-  return got;
-}
-// Bir satır bandındaki kelimeleri sütunlara dağıt; iki sütuna taşan kelime harf harf bölünür
-function mlRowCells(ml, y0, y1, cols) {
-  const out = cols.map(() => '');
-  const colOf = (cx) => cols.findIndex(([a, b]) => cx >= a - 3 && cx <= b + 3);
-  for (const e of mlWords(ml, cols[0][0] - 3, y0, cols[cols.length - 1][1] + 3, y1)) {
-    const a = colOf(e.b[0] + 2), b = colOf(e.b[2] - 2);
-    if (a >= 0 && a === b) { out[a] += e.t; continue; }
-    if (e.s.length) { for (const q of e.s) { const k = colOf((q.b[0] + q.b[2]) / 2); if (k >= 0) out[k] += q.t; } }
-    else { const k = colOf((e.b[0] + e.b[2]) / 2); if (k >= 0) out[k] += e.t; }
-  }
-  return out;
-}
 
 function crop(src, x0, y0, x1, y1, scale) {
   const pad = 12; const w = Math.max(1, Math.round(x1 - x0)), h = Math.max(1, Math.round(y1 - y0));
@@ -1772,23 +1731,14 @@ async function analyzeTable(img, progress) {
   let stats = all.map((row) => dayCols.map((ci) => row[ci]));
 
   // 5) Metin tanıma (isimler, hücre yazıları, başlık)
-  // APK'da önce telefonun kendi metin tanıması: bütün tablo tek seferde okunur. Tesseract yalnızca gerekirse yüklenir.
-  progress('Yazılar okunuyor', 0.08);
-  const ml = await mlkitRead(cv);
-  let worker = null, workerTried = false;
-  const needWorker = async () => {
-    if (worker || workerTried) return worker;
-    workerTried = true;
-    try {
-      progress('Metin tanıma modeli yükleniyor', 0.1);
-      // model başlatılamazsa takılıp kalmasın
-      // ML Kit varken Tesseract yalnızca birkaç hücre/isim için yedektir: tek okuyucu yeter (telefon belleği)
-      worker = await Promise.race([getWorker(progress, ml ? 1 : OCR_N), new Promise((_, rej) => setTimeout(() => rej(new Error('zaman aşımı')), 60000))]);
-    } catch (e) { console.warn(e); if (!ml) warnings.push('Metin tanıma bu cihazda çalışmadı; isimleri elle yazmanız gerekiyor. Renkler (OFF) yine de okundu.'); }
-    return worker;
-  };
-  if (!ml) await needWorker();
-  const textOk = !!(ml || worker);
+  let worker = null;
+  try {
+    progress('Metin tanıma modeli yükleniyor', 0.06);
+    // model başlatılamazsa takılıp kalmasın
+    worker = await Promise.race([getWorker(progress), new Promise((_, rej) => setTimeout(() => rej(new Error('zaman aşımı')), 60000))]);
+  }
+  catch (e) { console.warn(e); warnings.push('Metin tanıma bu cihazda çalışmadı; isimleri elle yazmanız gerekiyor. Renkler (OFF) yine de okundu.'); }
+  const textOk = !!worker;
 
   const names = [], texts = []; let aiRow = null; let claudeInfo = { status: 'off' }; let aiMeta = { shift: '', firstDay: '' };
   let title = '';
@@ -1822,54 +1772,7 @@ async function analyzeTable(img, progress) {
     dayCols = right2.filter((i) => widths[i] >= med2 * 0.55 && widths[i] <= med2 * 1.8);
     stats = all.map((row) => dayCols.map((ci) => row[ci]));
   };
-  if (ml) {
-    // ---- ML Kit: tek okumanın sonucu satır/sütunlara dağıtılır ----
-    title = ml.lines.filter((l) => l.b[3] <= tableTop + 4).sort((a, b) => a.b[1] - b.b[1]).map((l) => l.t).join('\n');
-    const headerish = /(AD\s*SOYAD|ADI\s*SOYADI|PERSONEL|İSİM|ISIM|SİCİL|SICIL|TARİH|TARIH|^SIRA|^NO$)/i;
-    const mlNames = (ci) => rowsB.map(([y0, y1], r) => {
-      if (grayRow[r] || all[r][ci].gray) return { t: '', conf: 0, raw: '' };
-      const [x0, x1] = colsB[ci]; const raw = mlWords(ml, x0 - 2, y0 - 2, x1 + 2, y1 + 2).map((e) => e.t).join(' ');
-      return { t: upperFix(tidy(raw)), conf: 90, raw };
-    });
-    let res = mlNames(nameCol);
-    if (score(res.map((x) => x.t)) < rowsB.length * 0.4) {
-      for (const ci of nameColCands()) { const got = mlNames(ci); if (score(got.map((x) => x.t)) > score(res.map((x) => x.t))) { res = got; nameCol = ci; } }
-      resetDayCols();
-    }
-    progress('İsimler okundu', 0.5);
-    // isim gibi görünmeyen satırlar (başlık satırı hariç) Tesseract ile ayrıntılı okunur; model yalnızca gerekirse yüklenir
-    const weak = rowsB.map((_, r) => r).filter((r) => !(grayRow[r] || all[r][nameCol].gray) && !looksLikeName(res[r].t) && !headerish.test(res[r].raw) && (res[r].t || all[r][nameCol].inkFrac > 0.02));
-    if (weak.length && await needWorker()) {
-      let wDone = 0;
-      await mapLimit(weak, OCR_N + 1, async (r) => { res[r] = better(await nameRowT(nameCol, r), res[r]); wDone++; progress(`İsimler kontrol ediliyor (${wDone}/${weak.length})`, 0.5 + 0.2 * (wDone / weak.length)); });
-    }
-    names.push(...res.map((x) => x.t));
-    aiRow = rowsB.map(() => false);
-    if (score(names) < Math.max(1, (rowsB.length - 1) * 0.4)) warnings.push('Bu tablodaki isimler okunamadı; tablo düzeni farklı olabilir. İsim olmayan satırlar kaydedilmeyecek.');
-    // hücreler
-    const dc = dayCols.map((ci) => colsB[ci]);
-    const rowTexts = rowsB.map(([y0, y1], r) => (grayRow[r] ? dc.map(() => '') : mlRowCells(ml, y0 - 2, y1 + 2, dc)));
-    // aynı görünüşlü hücreler aynı yazıyı taşır: okunamayan ya da tek tük yanlış okunan hücreler grubun çoğunluğuyla tamamlanır
-    const firstName = names.findIndex((t) => looksLikeName(t));
-    const groups = groupCells(cd.data, w, rowsB, dc, (r, k) => r >= Math.max(0, firstName) && !grayRow[r] && !stats[r][k].gray && stats[r][k].fill === 'white' && stats[r][k].inkFrac >= 0.004);
-    const open = [];
-    for (const G of groups) {
-      const codes = G.m.map(([r, k]) => { const c = parseCode(rowTexts[r][k]); return c ? c : null; });
-      const cnt = {}; codes.forEach((c) => { if (c) cnt[c] = (cnt[c] || 0) + 1; });
-      const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
-      if (!top) { if (G.m.some(([r]) => looksLikeName(names[r]))) open.push(G); continue; }
-      const known = codes.filter(Boolean).length; const at = G.m[codes.indexOf(top[0])]; const raw = rowTexts[at[0]][at[1]];
-      G.m.forEach(([r, k], i) => { if (!codes[i] || (codes[i] !== top[0] && top[1] >= 3 && top[1] / known >= 0.8)) rowTexts[r][k] = raw; });
-    }
-    // hiçbir üyesi okunamayan gruplar: Tesseract ile birkaç örnekten etiketlenir
-    if (open.length && await needWorker()) {
-      progress('Hücreler kontrol ediliyor', 0.8);
-      const labels = await labelGroups(worker, clean, rowsB, dc, open);
-      open.forEach((G, i) => { if (labels[i] != null) G.m.forEach(([r, k]) => { if (!parseCode(rowTexts[r][k])) rowTexts[r][k] = labels[i]; }); });
-    }
-    texts.push(...rowTexts.map((t, r) => (grayRow[r] ? dc.map(() => '') : t.map((x, k) => (stats[r][k].gray ? '' : x)))));
-    progress('Hücreler okundu', 0.9);
-  } else if (worker) {
+  if (worker) {
     if (tableTop > 20) {
       const { c } = crop(clean, 0, 0, w, tableTop, 1);
       try { title = (await ocr(worker, c, { tessedit_pageseg_mode: '6', tessedit_char_whitelist: '' })).text; } catch (e) { /* başlık isteğe bağlı */ }
@@ -1942,8 +1845,7 @@ async function analyzeTable(img, progress) {
 
   // Gri ara satırlar (ör. "2. VARDİYA" bandı): yalnızca vardiya numarası için bakılır, isim/hücre okunmaz
   const sectionShift = rowsB.map(() => '');
-  if (ml) for (let r = 0; r < rowsB.length; r++) { if (grayRow[r]) sectionShift[r] = shiftFromTitle(mlWords(ml, colsB[0][0] - 3, rowsB[r][0] - 2, colsB[colsB.length - 1][1] + 3, rowsB[r][1] + 2).map((e) => e.t).join(' ')); }
-  else if (worker) for (let r = 0; r < rowsB.length; r++) if (grayRow[r]) {
+  if (worker) for (let r = 0; r < rowsB.length; r++) if (grayRow[r]) {
     const [y0, y1] = rowsB[r]; const { c } = crop(cleanDark, colsB[0][0], y0, colsB[colsB.length - 1][1], y1, (y1 - y0) < 40 ? 48 / (y1 - y0) : 1);
     try { sectionShift[r] = shiftFromTitle((await ocr(worker, c, { tessedit_pageseg_mode: '7', tessedit_char_whitelist: '' })).text); } catch (e) { /* yoksay */ }
   }
@@ -1962,7 +1864,7 @@ async function analyzeTable(img, progress) {
     for (let r = firstPerson - 1; r >= Math.max(0, firstPerson - 3); r--) {
       const [y0, y1] = rowsB[r];
       // tarih başlığı griyse de okunur: koyu yazıyı ayrı eşikle ayıkla
-      const txt = ml ? mlRowCells(ml, y0 - 2, y0 + (y1 - y0) * 0.6, cols) : await readStrip(worker, grayRow[r] ? cleanDark : clean, y0, y0 + (y1 - y0) * 0.6, cols, '7');
+      const txt = await readStrip(worker, grayRow[r] ? cleanDark : clean, y0, y0 + (y1 - y0) * 0.6, cols, '7');
       const nums = txt.map((t) => { const n = parseInt(t.replace(/\D/g, '').slice(0, 2), 10); return n >= 1 && n <= 31 ? n : null; });
       const cnt = nums.filter((n) => n).length; if (cnt > bestCnt) { bestCnt = cnt; bestNums = nums; }
     }

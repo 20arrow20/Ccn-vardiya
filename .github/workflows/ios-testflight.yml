@@ -2,7 +2,7 @@ name: iOS TestFlight
 
 # Commit mesajında [testflight] varsa çalışır: iPhone uygulaması GitHub'ın Mac makinesinde imzalanıp
 # App Store Connect'e (TestFlight) yüklenir. Anahtar kimliği, ekip ve Issuer kimliği gizli değildir, burada yazılı;
-# yalnızca anahtar dosyasının içeriği depo ayarlarında gizli kayıt olarak durur: ASC_KEY_P8
+# yalnızca anahtar dosyasının içeriği depo ayarlarında (Settings → Secrets → Actions) gizli kayıt olarak durur: ASC_KEY_P8
 on:
   push:
     branches: [main, vardiya-panosu]

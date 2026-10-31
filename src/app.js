@@ -68,6 +68,8 @@ function defaultStore() {
       company: '',
       hours: { '1': '08:00–16:00', '2': '16:00–24:00', '3': '00:00–08:00' },
       colors: { red: 'OFF', orange: '', yellow: '', green: '', blue: '', purple: '', gray: '' },
+      // paylaşılan liste: başlıklar kalın mı, isimler numaralı / maddeli / düz
+      share: { bold: true, style: 'num' },
     },
   };
 }
@@ -164,7 +166,7 @@ function askPhotoAccess(then) {
 }
 function normalize(raw) {
   const s = cleanPeople(migrateKeys(raw)); const d = defaultStore();
-  return { ...d, ...s, aliases: s.aliases || {}, areas: Array.isArray(s.areas) ? s.areas : d.areas, dayAreas: s.dayAreas || {}, settings: { ...d.settings, ...s.settings, hours: { ...d.settings.hours, ...(s.settings || {}).hours }, colors: { ...d.settings.colors, ...(s.settings || {}).colors } } };
+  return { ...d, ...s, aliases: s.aliases || {}, areas: Array.isArray(s.areas) ? s.areas : d.areas, dayAreas: s.dayAreas || {}, settings: { ...d.settings, ...s.settings, hours: { ...d.settings.hours, ...(s.settings || {}).hours }, colors: { ...d.settings.colors, ...(s.settings || {}).colors }, share: { ...d.settings.share, ...(s.settings || {}).share } } };
 }
 function load() {
   try {
@@ -359,7 +361,7 @@ function viewDaily() {
       <button class="iconbtn" aria-label="Sonraki gün" data-act="shift-date" data-n="1">${ICON_RIGHT}</button>
     </div>
     <div class="row"><div class="chips">${chips}</div><input type="date" id="date-pick" value="${d}" aria-label="Tarih seç"></div>
-    ${outOfRange ? `<div class="note">Bu tarih yüklenen listelerin dışında (${fmtShort(range.min)} – ${fmtShort(range.max)}). Yeni dönemin listesini “Liste Yükle”den ekleyin.</div>` : ''}
+    ${outOfRange ? `<div class="note">Bu tarih yüklenen listelerin dışında. Yüklü liste: <b>${fmtShort(range.min)} – ${fmtShort(range.max)}</b>. Yeni dönemin listesini “Liste Yükle”den ekleyin.<div class="row" style="margin-top:8px"><button class="chip" data-act="set-date" data-date="${range.min}">İlk gün ${fmtShort(range.min)}</button><button class="chip" data-act="set-date" data-date="${range.max}">Son gün ${fmtShort(range.max)}</button></div></div>` : ''}
     <div class="shiftchips">${tabs}</div>
   </div>
   ${hasAny ? `<section class="card stack dayshift" data-s="${g}">
@@ -379,19 +381,21 @@ function viewDaily() {
   : `<div class="card stack"><h2>Henüz liste yok</h2><p class="muted">Şirketin gönderdiği vardiya listesi görsellerini yükleyin; isimler ve günler otomatik okunur, kırmızı hücreler OFF sayılır.</p><div><button class="btn primary" data-act="goto" data-view="yukle">${ICON_UPLOAD}Liste yükle</button></div></div>`}`;
 }
 
-function shareText(date, which) {
+function shareText(date, which, fmt) {
   const lists = dayLists(date);
+  const F = fmt || store.settings.share || { bold: true, style: 'num' };
+  const B = (t) => (F.bold ? `*${t}*` : t);
+  // çalışanlar, OFF, raporlu, izinli: hepsi alt alta liste
+  const list = (arr) => (arr.length ? arr.map((p, i) => (F.style === 'num' ? `${i + 1}. ` : F.style === 'bullet' ? '• ' : '') + p.name) : ['-']);
   const block = (g) => {
     const L = lists[g]; const S = shiftStats(L); const h = store.settings.hours[g];
-    const lines = [`*${g}. VARDİYA*${h ? ` (${h})` : ''}`,
+    const lines = [B(`${g}. VARDİYA`) + (h ? ` (${h})` : ''),
       `Toplam: ${S.total} kişi | Çalışan: ${S.working} | OFF: ${S.off} | Raporlu: ${S.rap} | İzinli: ${S.yi + S.mi}`, '',
-      `Çalışanlar (${S.working}):`];
-    L.working.forEach((p, i) => lines.push(`${i + 1}. ${p.name}`));
-    if (!L.working.length) lines.push('-');
-    for (const a of ABSENT) if (L.absent[a.code].length) lines.push('', `${a.title} (${L.absent[a.code].length}): ${L.absent[a.code].map((p) => p.name).join(', ')}`);
+      B(`Çalışanlar (${S.working})`), ...list(L.working)];
+    for (const a of ABSENT) if (L.absent[a.code].length) lines.push('', B(`${a.title} (${L.absent[a.code].length})`), ...list(L.absent[a.code]));
     return lines.join('\n');
   };
-  const head = `${store.settings.company ? store.settings.company + ' · ' : ''}${fmtShort(date)}`;
+  const head = B(`${store.settings.company ? store.settings.company + ' · ' : ''}${fmtShort(date)}`);
   const groups = which === 'all' ? ['1', '2', '3'] : [which];
   return [head, ...groups.map(block)].join('\n\n');
 }
@@ -600,6 +604,12 @@ function viewSettings() {
     <p class="small muted" style="margin:0">“Sistem” seçiliyken telefonun koyu/açık mod ayarı kullanılır.</p>
   </div>
   <div class="card stack">
+    <h2 style="font-size:22px">Paylaşılan liste biçimi</h2>
+    <label class="row" style="gap:8px"><input type="checkbox" id="set-sh-bold" ${S.share.bold ? 'checked' : ''}> <span>Başlıklar <b>kalın</b> (WhatsApp)</span></label>
+    <div class="seg seg3" role="radiogroup" aria-label="İsim listesi">${[['num', '1. 2. 3.'], ['bullet', '• Maddeli'], ['plain', 'Düz']].map(([v, l]) => `<button role="radio" data-act="set-sh-style" data-v="${v}" aria-selected="${S.share.style === v}" aria-checked="${S.share.style === v}">${l}</button>`).join('')}</div>
+    <pre class="share-prev">${esc((S.share.bold ? '*1. VARDİYA*' : '1. VARDİYA') + '\n' + (S.share.bold ? '*Çalışanlar (2)*' : 'Çalışanlar (2)') + '\n' + ['Ayşe Demir', 'Mehmet Kaya'].map((n, i) => (S.share.style === 'num' ? i + 1 + '. ' : S.share.style === 'bullet' ? '• ' : '') + n).join('\n') + '\n\n' + (S.share.bold ? '*OFF (2)*' : 'OFF (2)') + '\n' + ['Elif Arslan', 'Hasan Doğan'].map((n, i) => (S.share.style === 'num' ? i + 1 + '. ' : S.share.style === 'bullet' ? '• ' : '') + n).join('\n'))}</pre>
+  </div>
+  <div class="card stack">
     <h2 style="font-size:22px">İzinler</h2>
     <div class="permrow"><span><b>Fotoğraflar</b><br><span class="small muted">Vardiya listesi görsellerini seçmek için</span></span>
       <span class="pill ${prefs.photoOk ? 'ok' : 'bad'}">${prefs.photoOk ? 'İzin verildi' : 'İzin yok'}</span>
@@ -688,6 +698,7 @@ function bindView() {
   if (ui.view === 'ayarlar') {
     const S = store.settings;
     const bind = (id, fn) => { const el = document.getElementById(id); el.addEventListener('change', () => { fn(el.value); save(); toast('Kaydedildi'); }); };
+    const sb = document.getElementById('set-sh-bold'); sb.addEventListener('change', () => { S.share.bold = sb.checked; save(); render(); });
     bind('set-company', (v) => { S.company = v.trim(); document.getElementById('brand-sub').textContent = S.company || '1 · 2 · 3 vardiya, OFF ve izin takibi'; });
     ['1', '2', '3'].forEach((g) => bind('set-h' + g, (v) => { S.hours[g] = v.trim(); }));
     Object.keys(COLOR_NAMES).forEach((c) => bind('set-c-' + c, (v) => { S.colors[c] = v; }));
@@ -736,6 +747,7 @@ const actions = {
       bad.forEach(([k]) => { delete store.people[k]; renameDayAreas(k, null); }); save(); render(); toast(`${bad.length} hatalı kayıt silindi`);
     });
   },
+  'set-sh-style': (el) => { store.settings.share.style = el.dataset.v; save(); render(); },
   'set-theme': (el) => { prefs.theme = el.dataset.themeVal; savePrefs(); applyTheme(); render(); },
   'photo-allow': () => askPhotoAccess(() => { render(); toast('Fotoğraf izni verildi'); }),
   'photo-revoke': () => { prefs.photoOk = false; savePrefs(); render(); toast('Fotoğraf izni kaldırıldı'); },
@@ -1894,7 +1906,9 @@ async function analyzeTable(img, progress) {
     headerDays.push(...bestNums);
     // sondaki gün olmayan sütunları at (Toplam vb.)
     const found = headerDays.filter((n) => n).length;
-    if (found >= dayCols.length * 0.6) while (dayCols.length && headerDays[headerDays.length - 1] == null) { dayCols.pop(); headerDays.pop(); stats.forEach((r) => r.pop()); texts.forEach((r) => r.pop()); }
+    // (başlıktaki numarası okunamayan ama kişilerin vardiya/OFF bilgisini taşıyan son gün sütunu atılmaz)
+    const dayLike = (k) => { let n = 0, m = 0; for (let r = firstPerson; r < rowsB.length; r++) { if (grayRow[r]) continue; m++; const st = stats[r][k]; if ((st.fill !== 'white' && st.fill !== 'gray') || parseCode(texts[r][k] || '')) n++; } return m > 0 && n >= m * 0.4; };
+    if (found >= dayCols.length * 0.6) while (dayCols.length && headerDays[headerDays.length - 1] == null && !dayLike(dayCols.length - 1)) { dayCols.pop(); headerDays.pop(); stats.forEach((r) => r.pop()); texts.forEach((r) => r.pop()); }
   }
 
   // 7) Vardiya ve başlangıç tarihi tahmini

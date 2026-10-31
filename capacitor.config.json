@@ -3,7 +3,8 @@
   "appName": "CCN Vardiya Programı",
   "webDir": "www",
   "android": {
-    "allowMixedContent": false
+    "allowMixedContent": false,
+    "backgroundColor": "#17202B"
   },
   "plugins": {
     "SystemBars": {

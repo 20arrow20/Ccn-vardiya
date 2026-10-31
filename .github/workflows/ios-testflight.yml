@@ -1,8 +1,8 @@
 name: iOS TestFlight
 
 # Commit mesajında [testflight] varsa çalışır: iPhone uygulaması GitHub'ın Mac makinesinde imzalanıp
-# App Store Connect'e (TestFlight) yüklenir. İmza ve yükleme, depo ayarlarındaki App Store Connect API anahtarıyla yapılır:
-#   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (anahtar dosyasının içeriği), APPLE_TEAM_ID
+# App Store Connect'e (TestFlight) yüklenir. Anahtar kimliği, ekip ve Issuer kimliği gizli değildir, burada yazılı;
+# yalnızca anahtar dosyasının içeriği depo ayarlarında gizli kayıt olarak durur: ASC_KEY_P8
 on:
   push:
     branches: [vardiya-panosu]
@@ -13,9 +13,9 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     env:
-      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: XSN73M763K
+      ASC_ISSUER_ID: de2ddb00-9229-4f41-8c19-cf625d3d175c
+      APPLE_TEAM_ID: ZT67S2LPV2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,7 +29,7 @@ jobs:
         env:
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
         run: |
-          test -n "$ASC_KEY_ID" && test -n "$ASC_ISSUER_ID" && test -n "$APPLE_TEAM_ID" && test -n "$ASC_KEY_P8" || { echo "App Store Connect anahtar bilgileri depo ayarlarında eksik"; exit 1; }
+          test -n "$ASC_KEY_ID" && test -n "$ASC_ISSUER_ID" && test -n "$APPLE_TEAM_ID" && test -n "$ASC_KEY_P8" || { echo "ASC_KEY_P8 gizli kaydı depo ayarlarında yok"; exit 1; }
           mkdir -p "$RUNNER_TEMP/keys"
           printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8"
       - name: Arşivle (imzalı)

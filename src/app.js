@@ -1333,6 +1333,100 @@ async function readTableWithClaude(src, rowsB, colsB, progress) {
   return { start, dates: colDates, group, cols: Array.from({ length: ncols }, (_, i) => i), rows: out, warnings, dateFound, groupFound, claude: { status: 'ok' } };
 }
 
+// Birçok küçük görseli alt alta tek görsele dizip tek seferde oku; kelimeleri y konumuna göre geri dağıt.
+async function stackedOcr(pool, slots, per, onSlot, onDone) {
+  // parçalar tüm okuyuculara yetecek kadar küçük tutulur (az satırlı tabloda tek okuyucu çalışıp diğerleri boş kalmasın)
+  per = Math.max(3, Math.min(per, Math.ceil(slots.length / OCR_N)));
+  const chunks = []; for (let i = 0; i < slots.length; i += per) chunks.push(slots.slice(i, i + per));
+  await mapLimit(chunks, OCR_N, async (ch) => {
+    const gap = 10; const W = Math.max(...ch.map((x) => x.c.width)); let H = 0;
+    const ys = ch.map((x) => { const y = H; H += x.c.height + gap; return y; });
+    const big = document.createElement('canvas'); big.width = W; big.height = H; const g = big.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); ch.forEach((x, k) => g.drawImage(x.c, 0, ys[k]));
+    const d = await ocr(pool, big, { tessedit_pageseg_mode: '6', tessedit_char_whitelist: '' });
+    const words = ch.map(() => []);
+    for (const wd of d.words || []) {
+      const cy = (wd.bbox.y0 + wd.bbox.y1) / 2; const k = ys.findIndex((y, j) => cy >= y && cy < y + ch[j].c.height + gap);
+      if (k >= 0 && wd.text.trim()) words[k].push(wd);
+    }
+    ch.forEach((x, k) => onSlot(x, words[k].sort((a, b) => a.bbox.x0 - b.bbox.x0)));
+    onDone && onDone(ch.length);
+  });
+}
+
+// Yazılı hücreleri görünüşlerine göre grupla. bin: siyah-beyaz piksel verisi (0 = mürekkep).
+// Her hücrenin mürekkep kutusu 16x16'lık desene çevrilir; desenleri çok yakın olanlar aynı gruba girer.
+function groupCells(bin, w, rowsB, cols, want) {
+  const G = 16; const groups = [];
+  for (let r = 0; r < rowsB.length; r++) for (let k = 0; k < cols.length; k++) {
+    if (!want(r, k)) continue;
+    const x0 = Math.round(cols[k][0]) + 3, x1 = Math.round(cols[k][1]) - 3, y0 = Math.round(rowsB[r][0]) + 3, y1 = Math.round(rowsB[r][1]) - 3;
+    let bx0 = 1e9, by0 = 1e9, bx1 = -1, by1 = -1, n = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (bin[(y * w + x) * 4] === 0) { n++; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+    if (n < 6) continue;
+    const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1; const f = new Uint8Array(G * G);
+    for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
+      const sx = bx0 + Math.floor(gx * bw / G), ex = bx0 + Math.max(Math.floor((gx + 1) * bw / G), Math.floor(gx * bw / G) + 1);
+      const sy = by0 + Math.floor(gy * bh / G), ey = by0 + Math.max(Math.floor((gy + 1) * bh / G), Math.floor(gy * bh / G) + 1);
+      let c = 0, t = 0; for (let y = sy; y < ey; y++) for (let x = sx; x < ex; x++) { t++; if (bin[(y * w + x) * 4] === 0) c++; }
+      f[gy * G + gx] = c * 2 >= t ? 1 : 0;
+    }
+    const rh = rowsB[r][1] - rowsB[r][0];
+    const cell = { r, k, f, ar: bw / bh, hr: bh / rh, cx: (bx0 + bx1) / 2 - (cols[k][0] + cols[k][1]) / 2 };
+    const g = groups.find((q) => Math.abs(q.ar - cell.ar) < 0.18 * Math.max(1, q.ar) && Math.abs(q.hr - cell.hr) < 0.12 && hamming(q.f, f) <= G * G * 0.07);
+    if (g) g.m.push([r, k]); else groups.push({ f, ar: cell.ar, hr: cell.hr, m: [[r, k]] });
+  }
+  return groups;
+}
+function hamming(a, b) { let d = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++; return d; }
+// Her gruptan 3 örnek hücre seçip yan yana dizilmiş "örnek satırlar" halinde oku; örnekler aynı sonucu verirse grup etiketlenir.
+async function labelGroups(pool, clean, rowsB, cols, groups) {
+  if (!groups.length) return [];
+  // büyük gruplardan 3, küçüklerden üye sayısı kadar örnek
+  const per = 12; const lines = [];
+  for (let e = 0; e < 3; e++) {
+    const pool = groups.map((G, gi) => ({ G, gi })).filter(({ G }) => e < Math.min(3, G.m.length));
+    for (let i = 0; i < pool.length; i += per) lines.push(pool.slice(i, i + per).map(({ G, gi }) => { const n = Math.min(3, G.m.length); const m = G.m[Math.floor(e * G.m.length / n)]; return { gi, r: m[0], k: m[1] }; }));
+  }
+  const votes = groups.map(() => []);
+  await mapLimit(lines, OCR_N, async (slots) => {
+    // örnek hücreler, gerçek bir tablo satırı gibi aralıklı dizilir
+    const rh = Math.max(...slots.map((q) => rowsB[q.r][1] - rowsB[q.r][0]));
+    const s = rh < 40 ? 48 / rh : 1; const cw = Math.max(...slots.map((q) => cols[q.k][1] - cols[q.k][0]));
+    const pad = 12; const slotW = Math.round(cw * s); const H = Math.round(rh * s) + pad * 2;
+    const c = document.createElement('canvas'); c.width = slots.length * slotW + pad * 2; c.height = H;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, H);
+    slots.forEach((q, j) => {
+      const [x0, x1] = cols[q.k]; const [y0, y1] = rowsB[q.r]; const ww = x1 - x0, hh = y1 - y0;
+      g.drawImage(clean, x0, y0, ww, hh, pad + j * slotW + (slotW - ww * s) / 2, pad + (H - pad * 2 - hh * s) / 2, ww * s, hh * s);
+    });
+    const d = await ocr(pool, c, { tessedit_pageseg_mode: '7', tessedit_char_whitelist: '' });
+    const ranges = slots.map((_, j) => [pad + j * slotW, pad + (j + 1) * slotW]);
+    const txt = wordsToCells(d.words || [], 0, 0, 1, ranges);
+    // kalın harfler bazen iki kez okunur ("RR"): tekrarı at
+    slots.forEach((q, j) => { let t = txt[j].trim(); if (t && parseCode(t) == null && parseCode(t.replace(/(.)\1+/g, '$1')) != null) t = t.replace(/(.)\1+/g, '$1'); votes[q.gi].push(t); });
+  });
+  // en az iki örnek aynı ve geçerli bir kod veriyorsa grubun yazısı odur
+  return votes.map((v) => {
+    const ok = v.filter((t) => t && parseCode(t) != null);
+    const cnt = {}; ok.forEach((t) => { const key = parseCode(t); cnt[key] = (cnt[key] || []).concat(t); });
+    const best = Object.values(cnt).sort((a, b) => b.length - a.length)[0];
+    // örneklerin hepsi okunmuş ve aynı koda çıkmış olmalı
+    return best && best.length === v.length ? best[0] : null;
+  });
+}
+function wordsToCells(words, x0, pad, scale, cols) {
+  const out = cols.map(() => '');
+  const X = (v) => x0 + (v - pad) / scale;
+  const colOf = (cx) => cols.findIndex(([a, b]) => cx >= a - 3 && cx <= b + 3);
+  for (const word of words) {
+    const a = colOf(X(word.bbox.x0 + 2)), b = colOf(X(word.bbox.x1 - 2));
+    if (a >= 0 && a === b) { out[a] += word.text; continue; }
+    for (const sym of word.symbols || []) { const k = colOf(X((sym.bbox.x0 + sym.bbox.x1) / 2)); if (k >= 0) out[k] += sym.text; }
+  }
+  return out;
+}
+
 // Bir satırın gün hücrelerini tek seferde oku; karakterleri x konumuna göre sütunlara dağıt.
 // (Tek karakterli hücreleri ayrı ayrı okumak güvenilmez; satır bağlamında çok daha iyi tanınıyor.)
 async function readStrip(worker, clean, y0, y1, cols, psm) {
@@ -1529,6 +1623,8 @@ async function analyzeImage(img, progress) {
 }
 
 async function analyzeTable(img, progress) {
+  // isim ve hücre okuması aynı anda ilerlediği için ilerleme çubuğu geri gitmesin
+  { const raw = progress; let top = 0; progress = (m, v) => { top = Math.max(top, v || 0); raw(m, top); }; }
   // 1) Görseli işlenebilir boyuta getir
   const W0 = img.naturalWidth || img.width, H0 = img.naturalHeight || img.height;
   const scale = W0 < 1400 ? Math.min(2.5, 1400 / W0) : Math.min(1, 2400 / W0);
@@ -1642,17 +1738,26 @@ async function analyzeTable(img, progress) {
       const { c } = crop(clean, 0, 0, w, tableTop, 1);
       try { title = (await ocr(worker, c, { tessedit_pageseg_mode: '6', tessedit_char_whitelist: '' })).text; } catch (e) { /* başlık isteğe bağlı */ }
     }
+    const tidy = (t) => t.replace(/[Ââ]/g, (c) => (c === 'Â' ? 'A' : 'a')).replace(/[Ûû]/g, (c) => (c === 'Û' ? 'U' : 'u'))
+      .replace(/[^A-Za-zÇĞİÖŞÜçğıöşü .'-]/g, ' ').replace(/\s+/g, ' ').trim()
+      .split(' ').filter((w, i, a) => !(w.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, '').length < 2 && (i === 0 || i === a.length - 1))).join(' ');
+    const better = (x, y) => (looksLikeName(y.t) && !looksLikeName(x.t)) || (looksLikeName(y.t) === looksLikeName(x.t) && y.conf > x.conf) ? y : x;
     const readNames = async (ci, label) => {
+      const [x0, x1] = colsB[ci];
+      const want = rowsB.map((_, r) => r).filter((r) => !(grayRow[r] || all[r][ci].gray));
+      const res = rowsB.map(() => ({ t: '', conf: 0 }));
+      // 1) toplu okuma: isim hücreleri alt alta dizilip birkaç seferde okunur
       let doneN = 0;
-      return mapLimit(rowsB.map((_, r) => r), OCR_N + 1, async (r) => {
-        if (grayRow[r] || all[r][ci].gray) return '';
-        const [y0, y1] = rowsB[r]; const [x0, x1] = colsB[ci];
+      await stackedOcr(worker, want.map((r) => { const [y0, y1] = rowsB[r]; return { r, c: cellCanvas(x0, y0, x1, y1, Math.min(3, Math.max(1, 64 / (y1 - y0)))) }; }), 12, (slot, words) => {
+        res[slot.r] = { t: upperFix(tidy(words.map((x) => x.text).join(' '))), conf: words.length ? Math.min(...words.map((x) => x.confidence)) : 0 };
+      }, (n) => { doneN += n; progress(`${label} (${doneN}/${want.length})`, 0.15 + 0.3 * (doneN / Math.max(1, want.length))); });
+      // 2) şüpheli çıkan satırlar tek tek, ayrıntılı yöntemle yeniden okunur
+      const weak = want.filter((r) => !looksLikeName(res[r].t) || res[r].conf < 75 || !/\s/.test(res[r].t));
+      let wDone = 0;
+      await mapLimit(weak, OCR_N + 1, async (r) => {
+        const [y0, y1] = rowsB[r];
         const hgt = y1 - y0; const s = Math.min(3, Math.max(1, 64 / hgt));
-        const tidy = (t) => t.replace(/[Ââ]/g, (c) => (c === 'Â' ? 'A' : 'a')).replace(/[Ûû]/g, (c) => (c === 'Û' ? 'U' : 'u'))
-          .replace(/[^A-Za-zÇĞİÖŞÜçğıöşü .'-]/g, ' ').replace(/\s+/g, ' ').trim()
-          .split(' ').filter((w, i, a) => !(w.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, '').length < 2 && (i === 0 || i === a.length - 1))).join(' ');
         const run = async (c) => { const d = await ocr(worker, c, { tessedit_pageseg_mode: '7', tessedit_char_whitelist: '' }); return { t: upperFix(tidy(d.text)), conf: d.confidence || 0 }; };
-        const better = (x, y) => (looksLikeName(y.t) && !looksLikeName(x.t)) || (looksLikeName(y.t) === looksLikeName(x.t) && y.conf > x.conf) ? y : x;
         let pick = await run(cellCanvas(x0, y0, x1, y1, s));
         if (!looksLikeName(pick.t) || pick.conf < 80) pick = better(pick, await run(crop(soft, x0, y0, x1, y1, s).c));
         if (!looksLikeName(pick.t) || pick.conf < 70) pick = better(pick, await run(crop(clean, x0, y0, x1, y1, s).c));
@@ -1663,11 +1768,33 @@ async function analyzeTable(img, progress) {
             const r2 = await run(alt); if (/\s/.test(r2.t) && lev(nameKey(r2.t), flat) <= 1 && looksLikeName(r2.t)) { pick = r2; break; }
           }
         }
-        doneN++; progress(`${label} (${doneN}/${rowsB.length})`, 0.15 + 0.4 * (doneN / rowsB.length));
-        return pick.t;
+        // toplu okumanın sonucu da aday: hangisi daha iyi isimse o
+        res[r] = better(pick, res[r]); wDone++; progress(`${label}: kontrol (${wDone}/${weak.length})`, 0.45 + 0.1 * (wDone / weak.length));
       });
+      return res.map((x) => x.t);
     };
     const score = (arr) => arr.filter(looksLikeName).length;
+    // isim ve hücre okumaları birbirini beklemez: ikisi aynı anda çalışır
+    const readCells = async (dCols, st) => {
+      // Hücreler: aynı yazı ("2", "R", "Yİ") tabloda piksel olarak aynı görünür. Hücreler görünüşe göre gruplanır,
+      // her gruptan yalnızca birkaç örnek okunur ve sonuç gruptaki tüm hücrelere verilir. Satır satır okumaya göre çok hızlı.
+      const dc = dCols.map((ci) => colsB[ci]);
+      progress('Hücreler okunuyor', 0.56);
+      const rowTexts = rowsB.map(() => dc.map(() => ''));
+      const groups = groupCells(cd.data, w, rowsB, dc, (r, k) => !grayRow[r] && !st[r][k].gray && st[r][k].fill === 'white' && st[r][k].inkFrac >= 0.004);
+      const labels = await labelGroups(worker, clean, rowsB, dc, groups);
+      const redo = new Set();
+      groups.forEach((G, i) => { if (labels[i] == null) G.m.forEach(([r]) => redo.add(r)); else G.m.forEach(([r, k]) => { rowTexts[r][k] = labels[i]; }); });
+      // emin olunamayan satırlar eski yöntemle (satır şeridi) okunur
+      let cellsDone = 0; const redoRows = [...redo];
+      await mapLimit(redoRows, OCR_N + 1, async (r) => {
+        const t = await readRowCells(worker, clean, rowsB[r], dc, st[r]);
+        t.forEach((x, k) => { if (!rowTexts[r][k]) rowTexts[r][k] = x; });
+        cellsDone++; progress(`Hücreler kontrol ediliyor (${cellsDone}/${redoRows.length})`, 0.6 + 0.37 * (cellsDone / Math.max(1, redoRows.length)));
+      });
+      return rowTexts.map((t, r) => (grayRow[r] ? dc.map(() => '') : t.map((x, k) => (st[r][k].gray ? '' : x))));
+    };
+    let cellsP = readCells(dayCols, stats);
     let best = await readNames(nameCol, 'İsimler okunuyor');
     if (score(best) < rowsB.length * 0.4) {
       // isim sütunu yanlış seçilmiş olabilir: geniş diğer sütunları dene, en çok isim çıkanı al
@@ -1682,6 +1809,7 @@ async function analyzeTable(img, progress) {
       const med2 = right2.map((i) => widths[i]).sort((a, b) => a - b)[Math.floor(right2.length / 2)] || 1;
       dayCols = right2.filter((i) => widths[i] >= med2 * 0.55 && widths[i] <= med2 * 1.8);
       stats = all.map((row) => dayCols.map((ci) => row[ci]));
+      cellsP.catch(() => {}); cellsP = readCells(dayCols, stats);
     }
     names.push(...best);
     // claude.ai'de açıldıysa isimleri Claude okur (çok daha doğru); olmazsa cihazdaki okuma kalır
@@ -1695,13 +1823,7 @@ async function analyzeTable(img, progress) {
     if (ai) { ai.forEach((t, r) => { if (t != null) { names[r] = t; aiRow[r] = true; } }); best = names.slice(); }
     claudeInfo = claudeStatus;
     if (score(best) < Math.max(1, (rowsB.length - 1) * 0.4)) warnings.push('Bu tablodaki isimler okunamadı; tablo düzeni farklı olabilir. İsim olmayan satırlar kaydedilmeyecek.');
-    let cellsDone = 0;
-    texts.push(...await mapLimit(rowsB.map((_, r) => r), OCR_N + 1, async (r) => {
-      if (grayRow[r]) return dayCols.map(() => '');
-      const t = await readRowCells(worker, clean, rowsB[r], dayCols.map((ci) => colsB[ci]), stats[r]);
-      cellsDone++; progress(`Hücreler okunuyor (${cellsDone}/${rowsB.length})`, 0.55 + 0.42 * (cellsDone / rowsB.length));
-      return t.map((x, k) => (stats[r][k].gray ? '' : x));
-    }));
+    texts.push(...await cellsP);
   } else {
     rowsB.forEach(() => { names.push(''); texts.push(dayCols.map(() => '')); });
   }

@@ -5,7 +5,7 @@ name: iOS TestFlight
 # yalnızca anahtar dosyasının içeriği depo ayarlarında gizli kayıt olarak durur: ASC_KEY_P8
 on:
   push:
-    branches: [vardiya-panosu]
+    branches: [main, vardiya-panosu]
 
 jobs:
   testflight:

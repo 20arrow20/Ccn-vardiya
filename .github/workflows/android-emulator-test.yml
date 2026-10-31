@@ -3,7 +3,7 @@ name: Emülatör okuma testi
 # Commit mesajında [emu] varsa çalışır: uygulama Android emülatöründe açılır, liste okuma hızı ve doğruluğu ölçülür.
 on:
   push:
-    branches: [vardiya-panosu]
+    branches: [main, vardiya-panosu]
 
 jobs:
   emulator:

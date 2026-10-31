@@ -4,7 +4,7 @@ name: iOS derleme
 # Apple Geliştirici hesabı onaylanınca imzalı derleme ve TestFlight'a yükleme buraya eklenecek.
 on:
   push:
-    branches: [vardiya-panosu]
+    branches: [main, vardiya-panosu]
 
 jobs:
   ios:

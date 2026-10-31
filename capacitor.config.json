@@ -11,5 +11,8 @@
       "insetsHandling": "css",
       "initialViewportFitValueHint": "cover"
     }
+  },
+  "ios": {
+    "backgroundColor": "#17202B"
   }
 }

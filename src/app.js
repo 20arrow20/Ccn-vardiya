@@ -619,7 +619,7 @@ function viewSettings() {
   </div>
   <div class="card stack">
     <h2 style="font-size:22px">Güncelleme</h2>
-    <p class="small muted" style="margin:0">Yüklü sürüm: <b>${esc(APP_VERSION)}</b>. Yeni sürümler Google Play üzerinden gelir.</p>
+    <p class="small muted" style="margin:0">Yüklü sürüm: <b>${esc(APP_VERSION)}</b>. Yeni sürümler ${window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === 'ios' ? 'App Store' : 'Google Play'} üzerinden gelir.</p>
     <div class="row"><button class="btn primary" data-act="check-update">Güncellemeleri denetle</button></div>
   </div>
   <div class="card stack">

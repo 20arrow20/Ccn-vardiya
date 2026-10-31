@@ -11,6 +11,7 @@
   "dependencies": {
     "@capacitor/android": "8.5.3",
     "@capacitor/core": "8.5.3",
+    "@capacitor/ios": "8.5.3",
     "@capacitor/share": "8.0.3",
     "@capawesome/capacitor-app-update": "8.1.1",
     "@fontsource/barlow": "5.2.6",

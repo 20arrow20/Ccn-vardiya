@@ -1,0 +1,30 @@
+name: iOS derleme
+
+# Commit mesajında [ios] varsa çalışır: iPhone projesi GitHub'ın Mac makinesinde derlenir (şimdilik imzasız, simülatör için).
+# Apple Geliştirici hesabı onaylanınca imzalı derleme ve TestFlight'a yükleme buraya eklenecek.
+on:
+  push:
+    branches: [vardiya-panosu]
+
+jobs:
+  ios:
+    if: contains(github.event.head_commit.message, '[ios]')
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Web dosyalarını iPhone projesine kopyala
+        run: node tools/build.mjs && npx cap sync ios
+      - name: Xcode sürümü
+        run: xcodebuild -version
+      - name: iPhone uygulamasını derle (simülatör, imzasız)
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | tail -40
+          test "${PIPESTATUS[0]}" -eq 0

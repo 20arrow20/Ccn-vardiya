@@ -94,7 +94,7 @@ function applyTheme() {
 applyTheme();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 
-// Açılış animasyonu: yaklaşık 2,4 sn; dokununca hemen geçer
+// Açılış animasyonu: yaklaşık 1,5 sn; dokununca hemen geçer
 (function intro() {
   const el = document.getElementById('intro'); if (!el) return;
   const sb = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SystemBars;
@@ -104,9 +104,9 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme
   const done = () => {
     if (el.dataset.out) return; el.dataset.out = '1';
     el.classList.add('out'); document.body.classList.remove('intro-run'); document.body.classList.add('intro-done'); applyTheme();
-    setTimeout(() => { el.remove(); document.body.classList.remove('intro-done'); }, 700);
+    setTimeout(() => { el.remove(); document.body.classList.remove('intro-done'); }, 480);
   };
-  setTimeout(done, reduce ? 500 : 2400);
+  setTimeout(done, reduce ? 400 : 1500);
   el.addEventListener('click', done);
 })();
 ['online', 'offline'].forEach((ev) => window.addEventListener(ev, () => { if (ui.view === 'ayarlar' && !$overlay.innerHTML) render(); }));

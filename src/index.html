@@ -50,25 +50,25 @@
 /* Açılış animasyonu: logo (CCN + üç vardiya çubuğu) sahneye girer, çubuklar sırayla yanar, ekran büyüyerek kaybolur */
 #intro { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; overflow: hidden; background: #17202b; color: #fff; cursor: pointer; }
 .intro-glow { position: absolute; inset: -20%; animation: introSpin 9s linear infinite; }
-.intro-glow i { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; opacity: 0; animation: introGlowIn .9s ease-out forwards; }
+.intro-glow i { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; opacity: 0; animation: introGlowIn 1.4s ease-out forwards; }
 .intro-glow i:nth-child(1) { left: -10%; top: 5%; background: radial-gradient(circle, rgba(240,166,58,.22), transparent 62%); }
-.intro-glow i:nth-child(2) { right: -10%; top: 15%; background: radial-gradient(circle, rgba(79,201,189,.20), transparent 62%); animation-delay: .1s; }
-.intro-glow i:nth-child(3) { left: 15%; bottom: -15%; background: radial-gradient(circle, rgba(154,157,242,.22), transparent 62%); animation-delay: .2s; }
+.intro-glow i:nth-child(2) { right: -10%; top: 15%; background: radial-gradient(circle, rgba(79,201,189,.20), transparent 62%); animation-delay: .15s; }
+.intro-glow i:nth-child(3) { left: 15%; bottom: -15%; background: radial-gradient(circle, rgba(154,157,242,.22), transparent 62%); animation-delay: .3s; }
 .intro-stage { position: relative; display: grid; justify-items: center; gap: 16px; }
 .intro-word { display: flex; gap: .04em; font: 700 clamp(84px, 27vw, 132px)/.9 var(--font-display); letter-spacing: .02em; }
-.intro-word span { display: inline-block; animation: introLetter .5s cubic-bezier(.2,.9,.25,1.25) both; }
-.intro-word span:nth-child(1) { animation-delay: .08s; } .intro-word span:nth-child(2) { animation-delay: .16s; } .intro-word span:nth-child(3) { animation-delay: .24s; }
+.intro-word span { display: inline-block; animation: introLetter .75s cubic-bezier(.2,.9,.25,1.25) both; }
+.intro-word span:nth-child(1) { animation-delay: .2s; } .intro-word span:nth-child(2) { animation-delay: .32s; } .intro-word span:nth-child(3) { animation-delay: .44s; }
 .intro-pills { display: flex; gap: clamp(10px, 3vw, 16px); }
 .intro-pills i { display: block; width: clamp(52px, 16vw, 78px); height: clamp(20px, 6vw, 28px); border-radius: 999px; transform-origin: left center;
-  animation: introPill .4s cubic-bezier(.3,1.5,.5,1) both, introPulse .34s ease-in-out both; }
-.intro-pills i:nth-child(1) { background: #f0a63a; --g: rgba(240,166,58,.65); animation-delay: .4s, .78s; }
-.intro-pills i:nth-child(2) { background: #4fc9bd; --g: rgba(79,201,189,.65); animation-delay: .46s, .88s; }
-.intro-pills i:nth-child(3) { background: #9a9df2; --g: rgba(154,157,242,.65); animation-delay: .52s, .98s; }
-.intro-name { font: 600 19px/1 var(--font-display); text-transform: uppercase; color: rgba(255,255,255,.82); animation: introName .55s cubic-bezier(.2,.8,.2,1) .55s both; }
-.intro-bar { width: 148px; height: 3px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; margin-top: 6px; animation: introFade .3s ease .25s both; }
-.intro-bar b { display: block; height: 100%; background: linear-gradient(90deg, #f0a63a, #4fc9bd, #9a9df2); transform: scaleX(0); transform-origin: left; animation: introLoad 1.05s cubic-bezier(.5,0,.2,1) .25s forwards; }
-#intro.out { animation: introOut .42s cubic-bezier(.6,0,.4,1) forwards; pointer-events: none; }
-#intro.out .intro-stage { animation: introStageOut .42s cubic-bezier(.6,0,.4,1) forwards; }
+  animation: introPill .55s cubic-bezier(.3,1.5,.5,1) both, introPulse .5s ease-in-out both; }
+.intro-pills i:nth-child(1) { background: #f0a63a; --g: rgba(240,166,58,.65); animation-delay: .75s, 1.35s; }
+.intro-pills i:nth-child(2) { background: #4fc9bd; --g: rgba(79,201,189,.65); animation-delay: .85s, 1.5s; }
+.intro-pills i:nth-child(3) { background: #9a9df2; --g: rgba(154,157,242,.65); animation-delay: .95s, 1.65s; }
+.intro-name { font: 600 19px/1 var(--font-display); text-transform: uppercase; color: rgba(255,255,255,.82); animation: introName .9s cubic-bezier(.2,.8,.2,1) 1.1s both; }
+.intro-bar { width: 148px; height: 3px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; margin-top: 6px; animation: introFade .4s ease .5s both; }
+.intro-bar b { display: block; height: 100%; background: linear-gradient(90deg, #f0a63a, #4fc9bd, #9a9df2); transform: scaleX(0); transform-origin: left; animation: introLoad 1.7s cubic-bezier(.5,0,.2,1) .5s forwards; }
+#intro.out { animation: introOut .6s cubic-bezier(.6,0,.4,1) forwards; pointer-events: none; }
+#intro.out .intro-stage { animation: introStageOut .6s cubic-bezier(.6,0,.4,1) forwards; }
 body.intro-run .topbar, body.intro-run #app { opacity: 0; }
 /* üst çubuk yalnızca saydamlıkla gelir: transform, içindeki sabit alt sekme çubuğunu yerinden oynatırdı */
 body.intro-done .topbar { animation: introFade .35s ease both; }
@@ -369,5 +369,5 @@ table.grid td.name.rv { max-width: none; overflow: visible; }
 <main id="app"></main>
 <div id="overlay"></div>
 
-<script src="vendor/tesseract.min.js"></script>
+<script src="vendor/tesseract.min.js" defer></script>
 <script src="app.js"></script>

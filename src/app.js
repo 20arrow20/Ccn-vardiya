@@ -94,7 +94,7 @@ function applyTheme() {
 applyTheme();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 
-// Açılış animasyonu: yaklaşık 1,5 sn; dokununca hemen geçer
+// Açılış animasyonu: yaklaşık 2,4 sn; dokununca hemen geçer
 (function intro() {
   const el = document.getElementById('intro'); if (!el) return;
   const sb = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SystemBars;
@@ -104,9 +104,9 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme
   const done = () => {
     if (el.dataset.out) return; el.dataset.out = '1';
     el.classList.add('out'); document.body.classList.remove('intro-run'); document.body.classList.add('intro-done'); applyTheme();
-    setTimeout(() => { el.remove(); document.body.classList.remove('intro-done'); }, 480);
+    setTimeout(() => { el.remove(); document.body.classList.remove('intro-done'); setTimeout(() => checkForUpdate(false), 300); }, 700);
   };
-  setTimeout(done, reduce ? 400 : 1500);
+  setTimeout(done, reduce ? 500 : 2400);
   el.addEventListener('click', done);
 })();
 ['online', 'offline'].forEach((ev) => window.addEventListener(ev, () => { if (ui.view === 'ayarlar' && !$overlay.innerHTML) render(); }));
@@ -124,6 +124,32 @@ function errorReport() {
     `Cihaz: ${navigator.userAgent}`, `Ekran: ${screen.width}×${screen.height} @${devicePixelRatio}x`, `Dil: ${navigator.language}`, `Bağlantı: ${navigator.onLine ? 'çevrimiçi' : 'çevrimdışı'}`,
     `Kayıtlı kişi: ${Object.keys(store.people).length} · Yüklenen liste: ${store.uploads.length}`, '',
     list.length ? `Son hatalar (${list.length}):` : 'Kayıtlı hata yok.', ...list.map((x) => `- ${x.at} [${x.where}] ${x.msg}${x.stack ? '\n  ' + x.stack : ''}`)].join('\n');
+}
+
+// ---------- Güncelleme: Play'de yeni sürüm varsa açılışta "Güncelle" penceresi ----------
+const AppUpdate = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppUpdate;
+async function checkForUpdate(manual) {
+  if (!navigator.onLine) { if (manual) toast('Güncelleme için internet bağlantısı gerekli'); return; }
+  if (!AppUpdate || !(window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())) { if (manual) window.open(PLAY_URL, '_blank'); return; }
+  let info;
+  try { info = await AppUpdate.getAppUpdateInfo(); } catch (e) { logError('güncelleme denetimi', e); if (manual) AppUpdate.openAppStore().catch(() => window.open(PLAY_URL, '_blank')); return; }
+  // 2: yeni sürüm var, 3: güncelleme yarım kaldı
+  if (info.updateAvailability === 2 || info.updateAvailability === 3) updateSheet(info);
+  else if (manual) toast(`Uygulama güncel (${APP_VERSION})`);
+}
+function updateSheet(info) {
+  const v = info.availableVersionName ? ` (${esc(info.availableVersionName)})` : '';
+  sheet(`<div class="permhead">${ICON_UPLOAD}<h3>Yeni sürüm hazır${v}</h3></div>
+    <p class="muted" style="margin:0">CCN Vardiya Programı'nın yeni sürümü Google Play'de. Yenilikler ve düzeltmeler için şimdi güncelleyin. Kayıtlı listeleriniz silinmez.</p>
+    <div class="row"><button class="btn primary" id="up-ok">Güncelle</button><button class="btn" data-x="1">Sonra</button></div>`, (bg) => {
+    bg.querySelector('#up-ok').addEventListener('click', async () => {
+      closeSheet();
+      try {
+        if (info.immediateUpdateAllowed) { const r = await AppUpdate.performImmediateUpdate(); if (r && r.code === 0) return; }
+        await AppUpdate.openAppStore();
+      } catch (e) { logError('güncelleme', e); window.open(PLAY_URL, '_blank'); }
+    });
+  });
 }
 
 // Görsel seçmeden önce fotoğraf erişimi için izin iste (bir kez; Ayarlar'dan geri alınabilir)
@@ -617,7 +643,8 @@ function bindView() {
     el.addEventListener('click', (e) => { e.preventDefault(); actions[act] && actions[act](el); });
   });
   const qi = document.getElementById('q');
-  if (qi) qi.addEventListener('input', () => { ui.q = qi.value; document.getElementById('ara-res').innerHTML = searchResults(); bindResults(); });
+  let qT;
+  if (qi) qi.addEventListener('input', () => { ui.q = qi.value; clearTimeout(qT); qT = setTimeout(() => { const res = document.getElementById('ara-res'); if (!res) return; res.innerHTML = searchResults(); bindResults(); }, 120); });
   bindResults();
   const dp = document.getElementById('date-pick');
   if (dp) dp.addEventListener('change', () => { if (dp.value) { ui.date = dp.value; ui.gridStart = null; render(); } });
@@ -633,6 +660,7 @@ function bindView() {
     drop.addEventListener('dragleave', () => drop.classList.remove('over'));
     drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); const f = [...e.dataTransfer.files].filter((x) => x.type.startsWith('image/')); if (f.length) handleFiles(f); });
   }
+  if (ui.view === 'yukle') prewarmOcr();
   if (ui.view === 'yukle' && ui.review && !ui.busy) {
     for (const P of ui.review.parts) { const cv = document.getElementById('rv-cv-' + P.id); cv.width = P.preview.width; cv.height = P.preview.height; cv.getContext('2d').drawImage(P.preview, 0, 0); }
     const part = (el) => ui.review.parts.find((P) => P.id === el.dataset.id);
@@ -698,10 +726,7 @@ const actions = {
   'set-theme': (el) => { prefs.theme = el.dataset.themeVal; savePrefs(); applyTheme(); render(); },
   'photo-allow': () => askPhotoAccess(() => { render(); toast('Fotoğraf izni verildi'); }),
   'photo-revoke': () => { prefs.photoOk = false; savePrefs(); render(); toast('Fotoğraf izni kaldırıldı'); },
-  'check-update': () => {
-    if (!navigator.onLine) { toast('Güncelleme için internet bağlantısı gerekli'); return; }
-    window.open(PLAY_URL, '_blank');
-  },
+  'check-update': () => checkForUpdate(true),
   'send-report': () => doShare(errorReport(), 'CCN Vardiya Programı hata raporu'),
   'clear-errors': () => { writeLS(ERR_KEY, []); render(); toast('Hata kayıtları temizlendi'); },
   'wipe': () => confirmSheet('Tüm veriler silinsin mi?', 'Yüklenen bütün listeler ve kişiler bu cihazdan silinir. Bu işlem geri alınamaz.', 'Hepsini sil', () => { store = defaultStore(); save(); render(); toast('Tüm veriler silindi'); }),
@@ -1044,23 +1069,42 @@ function cellStats(px, w, x0, y0, x1, y1) {
   return { fill, inkFrac: ink / tot, redText, coloredFrac: colored / tot, light: lightN ? mode / 32 : 1, lightFrac: lightN / tot, sat: lightN ? satSum / lightN : 0 };
 }
 
+// Telefonun birden çok çekirdeği kullanılır: 2–3 okuyucu aynı anda çalışır (her biri ayrı model belleği tutar)
+const OCR_N = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 2) - 1));
 let workerP = null;
+let ocrProgress = null;
 function getWorker(onProgress) {
+  ocrProgress = onProgress || null;
   if (!window.Tesseract) return Promise.reject(new Error('Metin tanıma yüklenemedi'));
   if (!workerP) {
     const abs = (p) => new URL(p, location.href).href;
-    workerP = fetch('vendor/lang/tur.b64.txt').then((r) => { if (!r.ok) throw new Error('Türkçe dil modeli bulunamadı'); return r.text(); }).then((b64) => {
-      const bin = atob(b64.trim()); const data = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) data[i] = bin.charCodeAt(i);
-      return Tesseract.createWorker([{ code: 'tur', data }], 1, {
-      workerPath: abs('vendor/worker.min.js'), corePath: abs('vendor/core'),
-      cacheMethod: 'none', errorHandler: (e) => console.warn('OCR', e),
-      logger: (m) => { if (onProgress && m.status && /load|initializ/i.test(m.status)) onProgress('Metin tanıma modeli yükleniyor', 0.05 + 0.1 * (m.progress || 0)); },
+    workerP = fetch('vendor/lang/tur.b64.txt').then((r) => { if (!r.ok) throw new Error('Türkçe dil modeli bulunamadı'); return r.text(); }).then(async (b64) => {
+      // tarayıcının kendi base64 çözücüsü: döngüyle çözmekten çok daha hızlı, ekranı dondurmaz
+      const data = new Uint8Array(await (await fetch('data:application/octet-stream;base64,' + b64.trim())).arrayBuffer());
+      const make = () => Tesseract.createWorker([{ code: 'tur', data: data.slice() }], 1, {
+        workerPath: abs('vendor/worker.min.js'), corePath: abs('vendor/core'),
+        cacheMethod: 'none', errorHandler: (e) => console.warn('OCR', e),
+        logger: (m) => { if (ocrProgress && m.status && /load|initializ/i.test(m.status)) ocrProgress('Metin tanıma modeli yükleniyor', 0.05 + 0.1 * (m.progress || 0)); },
       });
+      const first = await make();
+      const pool = { free: [first], wait: [], size: 1 };
+      // diğer okuyucular arka planda açılır; açılamazsa (bellek) tek okuyucuyla devam
+      for (let i = 1; i < OCR_N; i++) make().then((w) => { pool.size++; release(pool, w); }).catch((e) => console.warn('ek okuyucu açılamadı', e));
+      return pool;
     }).catch((e) => { workerP = null; throw e; });
   }
   return workerP;
 }
+function release(pool, w) { const next = pool.wait.shift(); if (next) next(w); else pool.free.push(w); }
+function acquire(pool) { return pool.free.length ? Promise.resolve(pool.free.pop()) : new Promise((res) => pool.wait.push(res)); }
+// liste öğelerini en fazla n tanesi aynı anda olacak şekilde işle (sıra korunur)
+async function mapLimit(items, n, fn) {
+  const out = new Array(items.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.max(1, n) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); } }));
+  return out;
+}
+// "Liste Yükle" açılınca model önceden yüklenir: görsel seçilene kadar hazır olur
+function prewarmOcr() { if (window.Tesseract && !workerP) setTimeout(() => getWorker(null).catch(() => {}), 400); }
 
 function crop(src, x0, y0, x1, y1, scale) {
   const pad = 12; const w = Math.max(1, Math.round(x1 - x0)), h = Math.max(1, Math.round(y1 - y0));
@@ -1070,10 +1114,10 @@ function crop(src, x0, y0, x1, y1, scale) {
   return { c, pad, scale };
 }
 
-async function ocr(worker, canvas, params) {
-  await worker.setParameters(params);
-  const { data } = await worker.recognize(canvas);
-  return data;
+async function ocr(pool, canvas, params) {
+  const w = await acquire(pool);
+  try { await w.setParameters(params); const { data } = await w.recognize(canvas); return data; }
+  finally { release(pool, w); }
 }
 
 // ---------- Claude ile isim okuma ----------
@@ -1599,10 +1643,9 @@ async function analyzeTable(img, progress) {
       try { title = (await ocr(worker, c, { tessedit_pageseg_mode: '6', tessedit_char_whitelist: '' })).text; } catch (e) { /* başlık isteğe bağlı */ }
     }
     const readNames = async (ci, label) => {
-      const out = [];
-      for (let r = 0; r < rowsB.length; r++) {
-        progress(`${label} (${r + 1}/${rowsB.length})`, 0.15 + 0.4 * (r / rowsB.length));
-        if (grayRow[r] || all[r][ci].gray) { out.push(''); continue; }
+      let doneN = 0;
+      return mapLimit(rowsB.map((_, r) => r), OCR_N + 1, async (r) => {
+        if (grayRow[r] || all[r][ci].gray) return '';
         const [y0, y1] = rowsB[r]; const [x0, x1] = colsB[ci];
         const hgt = y1 - y0; const s = Math.min(3, Math.max(1, 64 / hgt));
         const tidy = (t) => t.replace(/[Ââ]/g, (c) => (c === 'Â' ? 'A' : 'a')).replace(/[Ûû]/g, (c) => (c === 'Û' ? 'U' : 'u'))
@@ -1620,9 +1663,9 @@ async function analyzeTable(img, progress) {
             const r2 = await run(alt); if (/\s/.test(r2.t) && lev(nameKey(r2.t), flat) <= 1 && looksLikeName(r2.t)) { pick = r2; break; }
           }
         }
-        out.push(pick.t);
-      }
-      return out;
+        doneN++; progress(`${label} (${doneN}/${rowsB.length})`, 0.15 + 0.4 * (doneN / rowsB.length));
+        return pick.t;
+      });
     };
     const score = (arr) => arr.filter(looksLikeName).length;
     let best = await readNames(nameCol, 'İsimler okunuyor');
@@ -1652,12 +1695,13 @@ async function analyzeTable(img, progress) {
     if (ai) { ai.forEach((t, r) => { if (t != null) { names[r] = t; aiRow[r] = true; } }); best = names.slice(); }
     claudeInfo = claudeStatus;
     if (score(best) < Math.max(1, (rowsB.length - 1) * 0.4)) warnings.push('Bu tablodaki isimler okunamadı; tablo düzeni farklı olabilir. İsim olmayan satırlar kaydedilmeyecek.');
-    for (let r = 0; r < rowsB.length; r++) {
-      progress(`Hücreler okunuyor (${r + 1}/${rowsB.length})`, 0.55 + 0.42 * (r / rowsB.length));
-      if (grayRow[r]) { texts.push(dayCols.map(() => '')); continue; }
+    let cellsDone = 0;
+    texts.push(...await mapLimit(rowsB.map((_, r) => r), OCR_N + 1, async (r) => {
+      if (grayRow[r]) return dayCols.map(() => '');
       const t = await readRowCells(worker, clean, rowsB[r], dayCols.map((ci) => colsB[ci]), stats[r]);
-      texts.push(t.map((x, k) => (stats[r][k].gray ? '' : x)));
-    }
+      cellsDone++; progress(`Hücreler okunuyor (${cellsDone}/${rowsB.length})`, 0.55 + 0.42 * (cellsDone / rowsB.length));
+      return t.map((x, k) => (stats[r][k].gray ? '' : x));
+    }));
   } else {
     rowsB.forEach(() => { names.push(''); texts.push(dayCols.map(() => '')); });
   }

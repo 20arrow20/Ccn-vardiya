@@ -1,0 +1,72 @@
+name: iOS TestFlight
+
+# Commit mesajında [testflight] varsa çalışır: iPhone uygulaması GitHub'ın Mac makinesinde imzalanıp
+# App Store Connect'e (TestFlight) yüklenir. İmza ve yükleme, depo ayarlarındaki App Store Connect API anahtarıyla yapılır:
+#   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (anahtar dosyasının içeriği), APPLE_TEAM_ID
+on:
+  push:
+    branches: [vardiya-panosu]
+
+jobs:
+  testflight:
+    if: contains(github.event.head_commit.message, '[testflight]')
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Web dosyalarını iPhone projesine kopyala
+        run: node tools/build.mjs && npx cap sync ios
+      - name: API anahtarını yerleştir
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          test -n "$ASC_KEY_ID" && test -n "$ASC_ISSUER_ID" && test -n "$APPLE_TEAM_ID" && test -n "$ASC_KEY_P8" || { echo "App Store Connect anahtar bilgileri depo ayarlarında eksik"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8"
+      - name: Arşivle (imzalı)
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          # derleme numarası her yüklemede artmalı
+          BUILD=$((100 + GITHUB_RUN_NUMBER))
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD" \
+            archive | tail -60
+          test "${PIPESTATUS[0]}" -eq 0
+      - name: App Store Connect'e yükle (TestFlight)
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" | tail -60
+          test "${PIPESTATUS[0]}" -eq 0
+      - name: Anahtarı sil
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/keys"

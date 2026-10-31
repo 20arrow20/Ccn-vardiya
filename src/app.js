@@ -179,7 +179,7 @@ function cleanPeople(s) {
   const entries = Object.entries(s.people).filter(([, p]) => looksLikeName(p.name)).sort((a, b) => a[0].length - b[0].length);
   const people = {}; const map = {};
   for (const [k, p] of entries) {
-    const into = Object.keys(people).find((ek) => sameish(people[ek].name, p.name));
+    const into = Object.keys(people).find((ek) => sameStrict(people[ek].name, p.name));
     if (into) { people[into] = { ...people[into], days: { ...p.days, ...people[into].days }, area: people[into].area || p.area }; map[k] = into; }
     else { people[k] = p; map[k] = k; }
   }
@@ -499,18 +499,28 @@ function viewUpload() {
 // Birden çok görselin satırlarını isme göre birleştir: aynı kişi farklı görsellerde/tarihlerde olabilir
 function mergedReview() {
   const R = ui.review; const map = new Map(); const order = [];
-  const add = (src, rawName, group, cells, ai) => {
+  let unnamed = 0; const letters = (n) => { const A = 'ABCÇDEFGHIİJKLMNOÖPRSŞTUÜVYZ'; let t = ''; n++; while (n > 0) { n--; t = A[n % A.length] + t; n = Math.floor(n / A.length); } return t + t + t; };
+  const add = (src, rawName, group, cells, ai, part, skip, check) => {
     let name = String(R.names[src] ?? rawName).trim().replace(/\s+/g, ' ');
+    // ismi okunamayan kişi sayıdan düşmesin: ayırt edici geçici ad (rakam değil harf; isim anahtarı harflerden oluşur)
+    if (!name && part) { name = 'İsmi Okunamadı ' + letters(unnamed++); check = true; }
     // kayıtlı kişiyle eşleşme: elle düzeltilmiş isim her zaman kazanır; Claude okuması düzeltilmemiş eski kaydı geçer
     if (R.names[src] === undefined && name && !store.demo) {
       const al = (store.aliases || {})[nameKey(name)];
-      const ex = al && store.people[al] ? al : store.people[nameKey(name)] ? nameKey(name) : Object.keys(store.people).find((k) => sameish(store.people[k].name, name));
-      if (ex && (store.people[ex].fixed || !ai)) name = store.people[ex].name;
+      const ex = al && store.people[al] ? al : store.people[nameKey(name)] ? nameKey(name) : Object.keys(store.people).find((k) => sameStrict(store.people[k].name, name));
+      // aynı tablodaki başka bir satır zaten bu kayda eşlendiyse bu satır ayrı kişidir
+      if (ex && (store.people[ex].fixed || !ai) && !(map.get(ex) && map.get(ex).parts.has(part))) name = store.people[ex].name;
     }
     let key = name ? nameKey(name) : '?' + src;
-    if (name && !map.has(key)) { const sim = order.find((x) => x.name && sameish(x.name, name)); if (sim) key = sim.key; }
+    // benzer isim yalnızca başka bir görseldeki satırla birleşir (aynı kişi iki görselde); aynı tablodaki iki satır iki kişidir
+    if (name && !map.has(key)) { const sim = order.find((x) => x.name && !x.check && !x.parts.has(part) && sameStrict(x.name, name)); if (sim) key = sim.key; }
+    if (part && map.has(key) && map.get(key).parts.has(part)) {
+      // aynı tabloda birebir aynı isim iki kez: iki ayrı kişi olarak kalır, kontrol için işaretlenir
+      let n = 1; while (map.has(key + '~' + n)) n++; key = key + '~' + n; name = name + ' (aynı isim ' + letters(n) + ')'; check = true;
+    }
     let m = map.get(key);
-    if (!m) { m = { key, name, srcs: [], groups: new Set(), files: new Set(), cells: {} }; map.set(key, m); order.push(m); }
+    if (!m) { m = { key, name, srcs: [], groups: new Set(), files: new Set(), parts: new Set(), cells: {}, allSkip: true }; map.set(key, m); order.push(m); }
+    if (part) m.parts.add(part); if (!skip) m.allSkip = false; if (check) m.check = true;
     m.srcs.push(src); m.raws = m.raws || []; m.raws.push(rawName); if (group) m.groups.add(group);
     if (ai) m.ai = true; if (R.names[src] !== undefined) m.edited = true;
     for (const [d, c] of Object.entries(cells)) {
@@ -523,9 +533,9 @@ function mergedReview() {
   for (const P of R.parts) P.rows.forEach((row, ri) => {
     const cells = {}; const g = row.group || P.group;
     row.cells.forEach((c, ci) => { let code = c.code; const implied = !code && !!g && !c.raw && !c.gray; if (implied) code = g; cells[P.dates ? P.dates[ci] : addDays(P.start, ci)] = { code, raw: c.raw, fill: c.fill, implied, weak: implied || (!!g && code === g) }; });
-    add(`${P.id}:${ri}`, row.name, g, cells, row.ai).files.add(P.file);
+    add(`${P.id}:${ri}`, row.name, g, cells, row.ai, P.id, !!row.skip, !!row.check).files.add(P.file);
   });
-  R.extra.forEach((id) => add(`x:${id}`, '', '', {}));
+  R.extra.forEach((id) => { const m = add(`x:${id}`, '', '', {}); m.allSkip = false; });
   for (const m of order) for (const [d, code] of Object.entries(R.cellEdits[m.key] || {})) m.cells[d] = { code, raw: '', fill: '', edited: true };
   let min = null, max = null;
   for (const P of R.parts) { const a = P.dates ? P.dates[0] : P.start, e = P.dates ? P.dates[P.dates.length - 1] : addDays(P.start, P.ncols - 1); if (!min || a < min) min = a; if (!max || e > max) max = e; }
@@ -534,16 +544,18 @@ function mergedReview() {
 }
 
 // İşaretlenmemiş satır: kullanıcı seçmediyse isim gibi görünmeyenler alınmaz
-function isSkipped(m) { const v = ui.review.skip[m.key]; return v === undefined ? !looksLikeName(m.name) : v; }
+// Varsayılan: okunan her kişi satırı alınır (ismi okunamasa bile); yalnızca hiç vardiya bilgisi olmayan satırlar alınmaz
+function isSkipped(m) { const v = ui.review.skip[m.key]; return v === undefined ? m.allSkip : v; }
 
 function viewReview() {
   const R = ui.review; const M = mergedReview();
   const head = M.dates.map((d) => { const dt = parseIso(d); return `<th>${pad(dt.getDate())}<small>${pad(dt.getMonth() + 1)}.${dt.getFullYear() % 100}</small></th>`; }).join('');
   const rows = M.rows.map((m) => { const skip = isSkipped(m); return `<tr class="${skip ? 'skip' : ''}">
     <td><input type="checkbox" data-act="rv-skip" data-key="${esc(m.key)}" ${skip ? '' : 'checked'} aria-label="Bu kişiyi al"></td>
-    <td class="name rv"><div class="rvn"><input type="text" data-act="rv-name" data-key="${esc(m.key)}" value="${esc(m.name)}" placeholder="Ad soyad yazın" aria-label="Ad soyad">${[...m.groups].map((g) => `<span class="gtag k-${g}">${g}</span>`).join('')}${m.files.size > 1 ? `<span class="small muted nowrap">${m.files.size} görsel</span>` : ''}</div></td>
+    <td class="name rv"><div class="rvn"><input type="text" class="${m.check && !m.edited ? 'check' : ''}" data-act="rv-name" data-key="${esc(m.key)}" value="${esc(m.name)}" placeholder="Ad soyad yazın" aria-label="Ad soyad">${[...m.groups].map((g) => `<span class="gtag k-${g}">${g}</span>`).join('')}${m.files.size > 1 ? `<span class="small muted nowrap">${m.files.size} görsel</span>` : ''}</div></td>
     ${M.dates.map((d) => { const c = m.cells[d] || { code: '' }; const k = CODES[c.code] ? c.code : 'Q'; return `<td><button class="code k-${k}" data-act="rv-cell" data-key="${esc(m.key)}" data-date="${d}" title="${c.raw ? 'Okunan: ' + esc(c.raw) : ''}${c.fill && c.fill !== 'white' && c.fill !== 'gray' ? ' Renk: ' + (COLOR_NAMES[c.fill] || c.fill) : ''}">${CODES[c.code] ? CODES[c.code].short : '?'}</button></td>`; }).join('')}</tr>`; }).join('');
   const people = M.rows.filter((m) => !isSkipped(m) && m.name).length;
+  const toCheck = M.rows.filter((m) => !isSkipped(m) && m.check && !m.edited).length;
   const warn = R.parts.flatMap((P) => P.warnings.map((w) => `<div class="note"><b>${esc(P.file)}:</b> ${esc(w)}</div>`)).join('');
   const cs = R.parts.map((P) => P.claude || { status: 'off' });
   const claudeNote = !window.claude ? '' : cs.every((c) => c.status === 'ok')
@@ -565,6 +577,7 @@ function viewReview() {
     <div class="row"><div style="flex:1;min-width:0"><div class="eyebrow">Kontrol et ve düzelt</div><h2 style="font-size:24px">${R.parts.length} görsel · ${people} kişi</h2></div>
       <button class="btn" data-act="rv-cancel">Vazgeç</button><button class="btn primary" data-act="rv-save">${ICON_CHECK}Hepsini kaydet</button></div>
     ${claudeNote}
+    ${toCheck ? `<div class="aibad"><span><b>${toCheck} kişinin ismi tam okunamadı</b> (kırmızı çerçeveli). Listeden düşürülmedi, sayı doğru kalsın diye alındı. İsme dokunup doğrusunu yazın.</span></div>` : ''}
     ${Object.keys(store.people).length ? `<label class="row wipebox"><input type="checkbox" id="rv-wipe" ${R.wipe ? 'checked' : ''}> <span><b>Eski kayıtları sil</b>, yalnızca bu listeleri kullan (${Object.keys(store.people).length} kayıtlı kişi silinir)</span></label>` : ''}
     <p class="small muted" style="margin:0">Tüm görsellerdeki isimler tek listede toplandı. Aynı isim birden fazla görselde varsa tek satırda birleşir. Hücreye dokunarak değiştirin; “?” okunamayan hücredir.</p>
     ${warn}
@@ -830,9 +843,9 @@ function saveReview() {
   if (store.demo || R.wipe) { store.people = {}; store.uploads = []; store.dayAreas = {}; store.aliases = {}; store.demo = false; }
   for (const m of rows) {
     let k = nameKey(m.name);
-    if (!store.people[k]) {
+    if (!store.people[k] && !m.check) {
       const al = (store.aliases || {})[k];
-      const sim = al && store.people[al] ? al : Object.keys(store.people).find((ek) => sameish(store.people[ek].name, m.name));
+      const sim = al && store.people[al] ? al : Object.keys(store.people).find((ek) => sameStrict(store.people[ek].name, m.name));
       if (sim) k = sim;
     }
     let p = store.people[k] || { name: m.name, group: '', days: {} };
@@ -954,6 +967,14 @@ function lev(a, b) {
 }
 // OCR'ın bir iki harf farklı okuduğu aynı kişi mi? (adı aynı, uzun isim, en çok 2 harf fark)
 const firstKey = (name) => nameKey(String(name).trim().split(/\s+/)[0] || '');
+// Liste okurken iki satırın aynı kişi sayılması için sıkı ölçü: birebir aynı ya da (uzun isimde) tek harf okuma farkı.
+// "İbrahim Demir" / "İbrahim Özdemir" gibi farklı kişiler birleşmez; kişi sayısı eksik çıkmaz.
+function sameStrict(nameA, nameB) {
+  const a = nameKey(nameA), b = nameKey(nameB);
+  if (a === b) return true;
+  if (Math.min(a.length, b.length) < 10 || Math.abs(a.length - b.length) > 1) return false;
+  return firstKey(nameA) === firstKey(nameB) && lev(a, b) <= 1;
+}
 function sameish(nameA, nameB) {
   const a = nameKey(nameA), b = nameKey(nameB);
   if (a === b) return true;
@@ -1854,7 +1875,9 @@ async function analyzeTable(img, progress) {
   const headerWord = /^(ad|adı|soyad|soyadı|ad soyad|adı soyadı|isim|personel|sicil|no|sıra|tarih|gün|günler)$/i;
   const isHeader = (s) => !s || headerWord.test(s.trim()) || /(AD\s*SOYAD|ADI\s*SOYADI|PERSONEL|İSİM)/i.test(s);
   let firstPerson = 0;
-  if (textOk) { while (firstPerson < rowsB.length && (isHeader(names[firstPerson]) || names[firstPerson].replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, '').length < 3)) firstPerson++; if (firstPerson >= rowsB.length) firstPerson = 1; }
+  // satırda renkli (OFF vb.) ya da vardiya kodu taşıyan hücreler çoğunluktaysa o satır kişidir, başlık değil
+  const looksData = (r) => { const st = stats[r] || []; if (!st.length || grayRow[r]) return false; const n = st.filter((c, k) => (c.fill !== 'white' && c.fill !== 'gray') || parseCode((texts[r] || [])[k] || '')).length; return n >= st.length * 0.5; };
+  if (textOk) { while (firstPerson < rowsB.length && !looksData(firstPerson) && (isHeader(names[firstPerson]) || names[firstPerson].replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, '').length < 3)) firstPerson++; if (firstPerson >= rowsB.length) firstPerson = 1; }
   else firstPerson = 1;
   // Başlıktaki gün numaraları
   const headerDays = [];
@@ -1932,10 +1955,14 @@ async function analyzeTable(img, progress) {
       if (digitCount[code] != null) digitCount[code]++;
       return { code, raw: code === 'Q' || raw ? raw : '', fill: st.fill };
     });
-    const nm = names[r] || (textOk ? '' : `Kişi ${r - firstPerson + 1}`);
+    let nm = names[r] || (textOk ? '' : `Kişi ${r - firstPerson + 1}`);
     const empty = !nm && cells.every((c) => !c.code);
     if (empty) continue;
-    rows.push({ name: nm, skip: textOk && !looksLikeName(nm), cells, group: section, _r: r, ai: !!(aiRow && aiRow[r]) });
+    // vardiya bilgisi olan satır bir kişidir: ismi okunamasa da listeden düşmez, "kontrol edin" diye işaretlenir
+    const hasData = cells.filter((c) => c.code).length >= Math.min(2, cells.length);
+    const okName = looksLikeName(nm);
+    if (!okName && nameKey(nm).length < 4) nm = '';
+    rows.push({ name: nm, skip: textOk && !okName && !hasData, check: textOk && !okName, cells, group: section, _r: r, ai: !!(aiRow && aiRow[r]) });
     if (section) sectionsUsed.add(section);
   }
   // okunamayan ("?") hücreler: claude.ai'de Claude okur
